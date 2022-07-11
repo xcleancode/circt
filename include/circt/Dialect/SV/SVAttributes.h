@@ -15,11 +15,16 @@
 #include "circt/Dialect/SV/SVEnums.h.inc"
 
 namespace circt {
+namespace sv {
+
+inline llvm::StringRef getSVAttributesAttrName() { return "sv.attributes"; }
 
 /// Helper functions to handle SV attributes.
 bool hasSVAttributes(mlir::Operation *op);
 mlir::ArrayAttr getSVAttributes(mlir::Operation *op);
 void setSVAttributes(mlir::Operation *op, mlir::Attribute);
+
+} // namespace sv
 
 } // namespace circt
 
