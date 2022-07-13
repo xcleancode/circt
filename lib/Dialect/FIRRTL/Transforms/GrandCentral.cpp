@@ -1890,6 +1890,8 @@ void GrandCentralPass::runOnOperation() {
                         &getContext(), getOutputDirectory().getValue(),
                         mapping.getName() + ".sv",
                         /*excludeFromFilelist=*/true));
+              op->setAttr("comment",
+                          builder.getStringAttr("VCS coverage exclude_file"));
               companionIDMap[id] = {name.getValue(), op, mapping};
 
               // Instantiate the mapping module inside the companion.  Keep the
