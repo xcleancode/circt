@@ -122,7 +122,7 @@ struct LoweringOptions {
   /// explicitly spilled to wire ops instead of implicilty being spilled at
   /// emission. Once ExportVerilog simplification is completed, this feature
   /// shoiuld be enabled by default.
-  bool spillWiresAtPrepare = false;
+  bool spillWiresAtPrepare = true;
 };
 
 /// Register commandline options for the verilog emitter.
