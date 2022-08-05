@@ -550,6 +550,11 @@ OpFoldResult XorPrimOp::fold(ArrayRef<Attribute> operands) {
     if (rhsCst->isZero() && getLhs().getType() == getType())
       return getLhs();
 
+  /// xor(0, x) -> x
+  if (auto lhsCst = getConstant(operands[0]))
+    if (lhsCst->isZero() && getRhs().getType() == getType())
+      return getRhs();
+
   /// xor(x, x) -> 0
   if (getLhs() == getRhs()) {
     auto width = abs(getType().getWidthOrSentinel());
@@ -759,6 +764,14 @@ OpFoldResult EQPrimOp::fold(ArrayRef<Attribute> operands) {
       return getLhs();
   }
 
+  if (auto lhsCst = getConstant(operands[0])) {
+    /// eq(1, x) -> x when x is 1 bit.
+    /// TODO: Support SInt<1> on the LHS etc.
+    if (lhsCst->isAllOnes() && getLhs().getType() == getType() &&
+        getRhs().getType() == getType())
+      return getRhs();
+  }
+
   return constFoldFIRRTLBinaryOp(
       *this, operands, BinOpKind::Compare,
       [=](APSInt a, APSInt b) -> APInt { return APInt(1, a == b); });
@@ -807,6 +820,14 @@ OpFoldResult NEQPrimOp::fold(ArrayRef<Attribute> operands) {
     if (rhsCst->isZero() && getLhs().getType() == getType() &&
         getRhs().getType() == getType())
       return getLhs();
+  }
+
+  if (auto lhsCst = getConstant(operands[0])) {
+    /// neq(0, x) -> x when x is 1 bit.
+    /// TODO: Support SInt<1> on the LHS etc.
+    if (lhsCst->isZero() && getLhs().getType() == getType() &&
+        getRhs().getType() == getType())
+      return getRhs();
   }
 
   return constFoldFIRRTLBinaryOp(
