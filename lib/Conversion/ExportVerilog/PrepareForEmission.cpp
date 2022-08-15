@@ -25,6 +25,7 @@
 #include "mlir/IR/ImplicitLocOpBuilder.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Debug.h"
 
 using namespace circt;
 using namespace comb;
@@ -460,6 +461,38 @@ static bool isMovableDeclaration(Operation *op) {
   return op->getNumResults() == 1 &&
          op->getResult(0).getType().isa<InOutType>() &&
          op->getNumOperands() == 0;
+}
+
+Optional<unsigned>
+EmittedExpressionSizeEstimator::getExpressionSize(Value v) const {
+  auto it = expressionSizes.find(v);
+  return it != expressionSizes.end() ? llvm::Optional<unsigned>(it->second)
+                                     : llvm::None;
+}
+
+unsigned
+EmittedExpressionSizeEstimator::getOperandSum(Operation *op,
+                                              unsigned interleave) const {
+  unsigned sum = 0;
+  if (op->getNumOperands() > 1)
+    sum += (op->getNumOperands() - 1) * interleave;
+
+  for (auto operand : op->getOperands()) {
+    if (auto size = getExpressionSize(operand)) {
+      sum += *size;
+    } else {
+      op->emitError() << op << "must be caluculated first";
+    }
+  }
+
+  return sum;
+}
+
+unsigned
+EmittedExpressionSizeEstimator::caluculateExpressionSize(Operation *op) const {
+  TypeSwitch<Operation *, unsigned>(op)
+      .Case<AddOp, MulOp, SubOp, DivSOp, DivUOp>([&](auto binary) { return 0; })
+      .Default([](Operation *) { return 0; });
 }
 
 /// If exactly one use of this op is an assign, replace the other uses with a

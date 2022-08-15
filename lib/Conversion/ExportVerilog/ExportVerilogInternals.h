@@ -122,6 +122,23 @@ private:
 };
 
 //===----------------------------------------------------------------------===//
+// EmittedExpressionSizeEstimator
+//===----------------------------------------------------------------------===//
+
+struct EmittedExpressionSizeEstimator {
+  EmittedExpressionSizeEstimator() = default;
+
+  Optional<unsigned> getExpressionSize(Value value) const;
+  unsigned caluculateExpressionSize(Operation *op) const;
+  unsigned caluculateExpressionSize(Value value) const;
+  void setExpressionSize(Value value);
+
+private:
+  unsigned getOperandSum(Operation *op, unsigned interleave = 0) const;
+  DenseMap<Value, unsigned> expressionSizes;
+};
+
+//===----------------------------------------------------------------------===//
 // SharedEmitterState
 //===----------------------------------------------------------------------===//
 
