@@ -543,6 +543,37 @@ static bool reuseExistingInOut(Operation *op) {
   return true;
 }
 
+void spillWires(Block &block, const LoweringOptions &options,
+                EmittedExpressionSizeEstimator &estimator) {
+  for (auto &op : block) {
+    if (!isVerilogExpression(&op))
+      continue;
+    auto size = estimator.caluculateExpressionSize(&op);
+    if (auto lhs = op.hasAttr()) {
+    }
+  }
+
+  // First step, check any nested blocks that exist in this region.  This walk
+  // can pull things out to our level of the hierarchy.
+  for (auto &op : block) {
+    // If the operations has regions, prepare each of the region bodies.
+    for (auto &region : op.getRegions()) {
+      if (!region.empty())
+        spillWires(region.front(), options, estimator);
+    }
+  }
+}
+
+void ExportVerilog::prepareHWModule(hw::HWModuleOp module,
+                                    const LoweringOptions &options) {
+  // Legalization.
+  prepareHWModule(*module.getBodyBlock(), options);
+
+  EmittedExpressionSizeEstimator estimator;
+  // Spill wires to prettify verilog outputs.
+  spillWires(*module.getBodyBlock(), options, estimator);
+}
+
 /// For each module we emit, do a prepass over the structure, pre-lowering and
 /// otherwise rewriting operations we don't want to emit.
 void ExportVerilog::prepareHWModule(Block &block,
