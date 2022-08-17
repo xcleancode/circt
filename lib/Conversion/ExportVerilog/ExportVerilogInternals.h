@@ -9,9 +9,12 @@
 #ifndef CONVERSION_EXPORTVERILOG_EXPORTVERILOGINTERNAL_H
 #define CONVERSION_EXPORTVERILOG_EXPORTVERILOGINTERNAL_H
 
+#include "circt/Dialect/Comb/CombVisitors.h"
 #include "circt/Dialect/HW/HWOps.h"
 #include "circt/Dialect/HW/HWSymCache.h"
+#include "circt/Dialect/HW/HWVisitors.h"
 #include "circt/Dialect/SV/SVOps.h"
+#include "circt/Dialect/SV/SVVisitors.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include <atomic>
@@ -119,23 +122,6 @@ private:
 
   /// Numeric suffix used as uniquification agent when resolving conflicts.
   size_t nextGeneratedNameID = 0;
-};
-
-//===----------------------------------------------------------------------===//
-// EmittedExpressionSizeEstimator
-//===----------------------------------------------------------------------===//
-
-struct EmittedExpressionSizeEstimator {
-  EmittedExpressionSizeEstimator() = default;
-
-  Optional<unsigned> getExpressionSize(Value value) const;
-  unsigned caluculateExpressionSize(Operation *op) const;
-  unsigned caluculateExpressionSize(Value value) const;
-  void setExpressionSize(Value value);
-
-private:
-  unsigned getOperandSum(Operation *op, unsigned interleave = 0) const;
-  DenseMap<Value, unsigned> expressionSizes;
 };
 
 //===----------------------------------------------------------------------===//
@@ -322,6 +308,11 @@ void prepareHWModule(hw::HWModuleOp module, const LoweringOptions &options);
 /// Rewrite module names and interfaces to not conflict with each other or with
 /// Verilog keywords.
 GlobalNameTable legalizeGlobalNames(ModuleOp topLevel);
+
+/// Return the verilog name of the operations that can define a symbol.
+/// Except for <WireOp, RegOp, LogicOp, LocalParamOp, InstanceOp>, check global
+/// state `getDeclarationVerilogName` for them.
+StringRef getSymOpName(Operation *symOp);
 
 } // namespace ExportVerilog
 } // namespace circt
