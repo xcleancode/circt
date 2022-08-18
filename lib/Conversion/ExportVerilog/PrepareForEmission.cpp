@@ -466,6 +466,15 @@ static bool isMovableDeclaration(Operation *op) {
 //===----------------------------------------------------------------------===//
 // EmittedExpressionSizeEstimator
 //===----------------------------------------------------------------------===//
+
+/*
+template <class T>
+static unsigned getDigit(T t) {
+  SmallString<16> s;
+  llvm::raw_string_ostream os(s);
+  os << t;
+  return s.size();
+}
 class EmittedExpressionSizeEstimator
     : public hw::TypeOpVisitor<EmittedExpressionSizeEstimator, unsigned>,
       public comb::CombinationalVisitor<EmittedExpressionSizeEstimator,
@@ -543,7 +552,7 @@ private:
   unsigned visitTypeOp(ArrayGetOp op) {}
   unsigned visitTypeOp(ArrayCreateOp op) {}
   unsigned visitTypeOp(ArrayConcatOp op) {}
-  unsigned visitTypeOp(StructCreateOp op) {}
+  unsigned visitTypeOp(StructCreateOp op) { getOperandSum(op); }
   unsigned visitTypeOp(StructExtractOp op) {}
   unsigned visitTypeOp(StructInjectOp op) {}
   unsigned visitTypeOp(EnumConstantOp op) {}
@@ -571,11 +580,18 @@ private:
     return getExpressionSize(op.getOperand()) + 1;
   }
   unsigned visitComb(ConcatOp op) {
-    return getOperandSum(op, /*interleave*/ 2, /*whitespace*/ false) + 2;
+    return getOperandSum(op, 2, false) + 2;
   }
-  unsigned visitComb(ExtractOp op) {}
+  unsigned visitComb(ExtractOp op) {
+    unsigned sum = op.getType().isInteger(1)
+                       ? getDigit(op.getLowBit()) +
+                       : getDigit(op.getLowBit()) + getDigit(op.getHi())
+  }
 
-  unsigned visitComb(ICmpOp op) { return getOperandSum(op, op.getPredicate()) }
+  unsigned visitComb(ICmpOp op) {
+    // TODO: Consider handle "&", "|" or "!==".
+    return getOperandSum(op)
+  }
 
   using Visitor::visitSV;
 
@@ -615,7 +631,7 @@ unsigned EmittedExpressionSizeEstimator::getOperandSum(Operation *op,
 
   return sum;
 }
-
+*/
 /// If exactly one use of this op is an assign, replace the other uses with a
 /// read from the assigned wire or reg. This assumes the preconditions for doing
 /// so are met: op must be an expression in a non-procedural region.
@@ -664,31 +680,59 @@ static bool reuseExistingInOut(Operation *op) {
   return true;
 }
 
-void spillWires(Block &block, const LoweringOptions &options,
-                EmittedExpressionSizeEstimator &estimator) {
+/// Return true if this is something that will get printed as a unary operator
+/// by the Verilog printer.
+/// TODO: This is copied from PrettifyVerilog. Create a common library for
+/// verilog expression stuffs.
+static bool isVerilogUnaryOperator(Operation *op) {
+  if (isa<comb::ParityOp>(op))
+    return true;
+
+  if (auto xorOp = dyn_cast<comb::XorOp>(op))
+    return xorOp.isBinaryNot();
+
+  if (auto icmpOp = dyn_cast<comb::ICmpOp>(op))
+    return icmpOp.isEqualAllOnes() || icmpOp.isNotEqualZero();
+
+  return false;
+}
+
+bool applyHeuristic(Operation &op, const LoweringOptions &options) {
+  assert(options.wireSpillingHeuristic != LoweringOptions::SpillNone);
+
+  // The operation might be cloned by PrettifyVerilog, if so don't spill wires
+  // to prevent name duplications.
+  if (isVerilogUnaryOperator(&op))
+    return false;
+
+  switch (options.wireSpillingHeuristic) {
+  case LoweringOptions::SpillAllNamehints:
+    return op.hasAttrOfType<StringAttr>("namehint");
+
+  default:
+    llvm_unreachable("unhandled options");
+  }
+}
+
+void spillWires(Block &block, const LoweringOptions &options) {
+  // If disallowLocalVariables is enabled, we cannot spill wires for procedural
+  // regions.
   if (options.disallowLocalVariables &&
       block.getParentOp()->hasTrait<ProceduralRegion>())
     return;
 
-  for (auto &op : block) {
+  for (auto &op : llvm::make_early_inc_range(block)) {
     if (!isVerilogExpression(&op))
       continue;
-    auto size = estimator.caluculateExpressionSize(&op);
-    if (auto namehint = op.getAttrOfType<StringAttr>("sv.namehint")) {
-      if (2 * namehint.size() <= size) {
-        // spill
-        lowerUsersToTemporaryWire(op);
-      }
-    }
+    if (applyHeuristic(op, options))
+      lowerUsersToTemporaryWire(op);
   }
 
-  // First step, check any nested blocks that exist in this region.  This walk
-  // can pull things out to our level of the hierarchy.
   for (auto &op : block) {
-    // If the operations has regions, prepare each of the region bodies.
+    // If the operations has regions, visit each of the region bodies.
     for (auto &region : op.getRegions()) {
       if (!region.empty())
-        spillWires(region.front(), options, estimator);
+        spillWires(region.front(), options);
     }
   }
 }
@@ -698,9 +742,8 @@ void ExportVerilog::prepareHWModule(hw::HWModuleOp module,
   // Legalization.
   prepareHWModule(*module.getBodyBlock(), options);
 
-  EmittedExpressionSizeEstimator estimator;
   // Spill wires to prettify verilog outputs.
-  spillWires(*module.getBodyBlock(), options, estimator);
+  spillWires(*module.getBodyBlock(), options);
 }
 
 /// For each module we emit, do a prepass over the structure, pre-lowering and

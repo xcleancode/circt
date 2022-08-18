@@ -120,6 +120,12 @@ struct LoweringOptions {
   /// If true, ExportVerilog uses an old emission. This flag should be
   /// deprecated once the old emission mode is no longer necessary.
   bool useOldEmissionMode = false;
+
+  enum WireSpillHeuristicStrategy {
+    SpillNone,         // Default
+    SpillAllNamehints, // Force wires for all namehints
+    SpillNamehintsIfShort
+  } wireSpillingHeuristic;
 };
 
 /// Register commandline options for the verilog emitter.
