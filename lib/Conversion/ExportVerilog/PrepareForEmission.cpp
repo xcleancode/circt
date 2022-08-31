@@ -27,6 +27,8 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 
+#define DEBUG_TYPE "prepare-for-emission"
+
 using namespace circt;
 using namespace comb;
 using namespace hw;
@@ -509,7 +511,10 @@ private:
   friend class TypeOpVisitor<EmittedExpressionSizeEstimator, unsigned>;
   friend class CombinationalVisitor<EmittedExpressionSizeEstimator, unsigned>;
   friend class Visitor<EmittedExpressionSizeEstimator, unsigned>;
-  unsigned visitUnhandledExpr(Operation *op) { return getOperandSum(op); }
+  unsigned visitUnhandledExpr(Operation *op) {
+    LLVM_DEBUG(op->emitWarning() << "unhandled");
+    return getOperandSum(op);
+  }
   unsigned visitInvalidComb(Operation *op) { return dispatchTypeOpVisitor(op); }
   unsigned visitUnhandledComb(Operation *op) { return visitUnhandledExpr(op); }
   unsigned visitInvalidTypeOp(Operation *op) { return dispatchSVVisitor(op); }
@@ -539,6 +544,9 @@ private:
   unsigned visitSV(RegOp op) {
     return op.getName().size() ? op.getName().size() : 5;
   }
+  unsigned visitSV(LogicOp op) {
+    return op.getName().size() ? op.getName().size() : 5;
+  }
 
   unsigned visitSV(ReadInOutOp op) {
     // Noop.
@@ -562,10 +570,14 @@ private:
     // Noop
     return caluculateExpressionSize(op.getOperand());
   }
+
+  unsigned visitTypeOp(ArrayCreateOp op) {
+    return 2 + getOperandSum(op, 2, false);
+  }
+  unsigned visitTypeOp(ArrayGetOp op) { return getOperandSum(op, 2, false); }
   /*TODO:
   unsigned visitTypeOp(ArraySliceOp op) {}
   unsigned visitTypeOp(ArrayGetOp op) {}
-  unsigned visitTypeOp(ArrayCreateOp op) {}
   unsigned visitTypeOp(ArrayConcatOp op) {}
   unsigned visitTypeOp(StructCreateOp op) { getOperandSum(op); }
   unsigned visitTypeOp(StructExtractOp op) {}
@@ -603,11 +615,12 @@ private:
   }
   unsigned visitComb(ConcatOp op) { return getOperandSum(op, 2, false) + 2; }
   unsigned visitComb(ExtractOp op) {
-    return op.getType().isInteger(1)
-               ? getDigit(op.getLowBit())
-               : getDigit(op.getLowBit()) +
-                     getDigit(op.getLowBit() +
-                              op.getType().cast<IntegerType>().getWidth());
+    return caluculateExpressionSize(op.getInput()) + 2 +
+           (op.getType().isInteger(1)
+                ? getDigit(op.getLowBit())
+                : getDigit(op.getLowBit()) +
+                      getDigit(op.getLowBit() +
+                               op.getType().cast<IntegerType>().getWidth()));
   }
 
   unsigned visitComb(ICmpOp op) {
@@ -632,7 +645,7 @@ unsigned EmittedExpressionSizeEstimator::caluculateExpressionSize(Value v) {
         .size();
   }
   expressionSizes[v] = dispatchCombinationalVisitor(v.getDefiningOp());
-  llvm::dbgs() << v << " " << expressionSizes[v] << "\n";
+  // llvm::dbgs() << v << " " << expressionSizes[v] << "\n";
   return expressionSizes[v];
 }
 
