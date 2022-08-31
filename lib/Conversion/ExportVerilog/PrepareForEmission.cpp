@@ -625,7 +625,9 @@ private:
 
   unsigned visitComb(ICmpOp op) {
     // TODO: Consider handle "&", "|" or "!==".
-    return getOperandSum(op);
+    if (op.isEqualAllOnes() || op.isNotEqualZero())
+      return caluculateExpressionSize(op.getOperand(0)) + 1;
+    return getOperandSum(op, stringifyICmpPredicate(op.getPredicate()).size());
   }
 
   using Visitor::visitSV;
@@ -644,9 +646,10 @@ unsigned EmittedExpressionSizeEstimator::caluculateExpressionSize(Value v) {
     return ExportVerilog::getPortVerilogName(moduleOp, blockArg.getArgNumber())
         .size();
   }
-  expressionSizes[v] = dispatchCombinationalVisitor(v.getDefiningOp());
+  unsigned size = dispatchCombinationalVisitor(v.getDefiningOp());
+  expressionSizes[v] = size;
   // llvm::dbgs() << v << " " << expressionSizes[v] << "\n";
-  return expressionSizes[v];
+  return size;
 }
 
 unsigned EmittedExpressionSizeEstimator::getOperandSum(Operation *op,
