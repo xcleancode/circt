@@ -188,7 +188,7 @@ StringRef ExportVerilog::getSymOpName(Operation *symOp) {
 }
 
 /// Return the verilog name of the port for the module.
-StringRef getPortVerilogName(Operation *module, ssize_t portArgNum) {
+StringRef ExportVerilog::getPortVerilogName(Operation *module, size_t portArgNum) {
   auto numInputs = hw::getModuleNumInputs(module);
   // portArgNum is the index into the result of getAllModulePortInfos.
   // Also ensure the correct index into the input/output list is computed.

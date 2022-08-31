@@ -33,6 +33,8 @@ bool isSimpleReadOrPort(Value v);
 /// for instances this is `instanceName`, etc.
 StringAttr getDeclarationName(Operation *op);
 
+StringRef getPortVerilogName(Operation *module, size_t portArgNum);
+
 /// Given an expression that is spilled into a temporary wire, try to
 /// synthesize a better name than "_T_42" based on the structure of the
 /// expression.

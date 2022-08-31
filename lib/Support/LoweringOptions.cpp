@@ -109,7 +109,7 @@ void LoweringOptions::parse(StringRef text, ErrorHandlerT errorHandler) {
       if (auto heuristic = parseWireSpillingHeuristic(option)) {
         wireSpillingHeuristic = *heuristic;
       } else {
-        errorHandler("expected 'spillNone' or 'spillAllNamehints'");
+        errorHandler("expected 'spillNone', 'spillAllNamehints' or 'spillNamehintsIfShort'");
       }
     } else {
       errorHandler(llvm::Twine("unknown style option \'") + option + "\'");

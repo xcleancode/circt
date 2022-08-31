@@ -533,9 +533,12 @@ private:
     // Naive
     return getOperandSum(op) + op.getFormatString().size();
   }
-  unsigned visitSV(MacroRefExprOp op);
-  unsigned visitSV(ConstantXOp op);
-  unsigned visitSV(ConstantZOp op);
+  unsigned visitSV(WireOp op) {
+    return op.getName().size() ? op.getName().size() : 5;
+  }
+  unsigned visitSV(RegOp op) {
+    return op.getName().size() ? op.getName().size() : 5;
+  }
 
   unsigned visitSV(ReadInOutOp op) {
     // Noop.
@@ -585,7 +588,11 @@ private:
   unsigned visitComb(ShrSOp op) { return getOperandSum(op); }
   unsigned visitComb(AndOp op) { return getOperandSum(op); }
   unsigned visitComb(OrOp op) { return getOperandSum(op); }
-  unsigned visitComb(XorOp op) { return getOperandSum(op); }
+  unsigned visitComb(XorOp op) {
+    if (op.isBinaryNot())
+      return 1 + caluculateExpressionSize(op.getOperand(0));
+    return getOperandSum(op);
+  }
   unsigned visitComb(ParityOp op) {
     return caluculateExpressionSize(op.getOperand()) + 1;
   }
@@ -619,10 +626,14 @@ unsigned EmittedExpressionSizeEstimator::caluculateExpressionSize(Value v) {
   auto it = expressionSizes.find(v);
   if (it != expressionSizes.end())
     return it->second;
-  if (auto arg = v.dyn_cast<BlockArgument>()) {
-    return 3;
+  if (auto blockArg = v.dyn_cast<BlockArgument>()) {
+    auto moduleOp = cast<HWModuleOp>(blockArg.getOwner()->getParentOp());
+    return ExportVerilog::getPortVerilogName(moduleOp, blockArg.getArgNumber())
+        .size();
   }
-  return dispatchCombinationalVisitor(v.getDefiningOp());
+  expressionSizes[v] = dispatchCombinationalVisitor(v.getDefiningOp());
+  llvm::dbgs() << v << " " << expressionSizes[v] << "\n";
+  return expressionSizes[v];
 }
 
 unsigned EmittedExpressionSizeEstimator::getOperandSum(Operation *op,
@@ -709,7 +720,7 @@ static bool isVerilogUnaryOperator(Operation *op) {
 /// spilling heuristic.
 bool shouldSpillWire(Operation &op,
                      LoweringOptions::WireSpillingHeuristic heuristic,
-                     DenseMap<Value, size_t> &operandMap) {
+                     EmittedExpressionSizeEstimator &estimator) {
   assert(heuristic != LoweringOptions::SpillNone &&
          "If none, we should not call `prettifyAfterLegalization` in the first "
          "place");
@@ -726,7 +737,9 @@ bool shouldSpillWire(Operation &op,
     return false;
   case LoweringOptions::SpillNamehintsIfShort:
     if (auto namehint = op.getAttrOfType<StringAttr>("sv.namehint"))
-      return !namehint.getValue().startswith("_") && namehint.size();
+      return !namehint.getValue().startswith("_") &&
+             namehint.size() <
+                 estimator.caluculateExpressionSize(op.getResult(0));
     return false;
   default:
     llvm_unreachable("unhandled options");
@@ -736,20 +749,20 @@ bool shouldSpillWire(Operation &op,
 /// After the legalization, we are able to know accurate verilog AST structures.
 /// So this function walks and prettifies verilog IR with a heuristic method
 /// specified by `options.wireSpillingHeuristic` based on the structures.
-static void prettifyAfterLegalization(Block &block,
-                                      const LoweringOptions &options,
-                                      EmittedExpressionSizeEstimator &estimator,
-                                      DenseMap<Value, size_t> &operandMap) {
+static void
+prettifyAfterLegalization(Block &block, const LoweringOptions &options,
+                          EmittedExpressionSizeEstimator &estimator) {
   // If disallowLocalVariables is enabled, we don't spill wires in procedural
   // regions.
   if (options.disallowLocalVariables &&
       block.getParentOp()->hasTrait<ProceduralRegion>())
     return;
 
+  DenseMap<Value, size_t> operandMap;
   for (auto &op : llvm::make_early_inc_range(block)) {
     if (!isVerilogExpression(&op))
       continue;
-    if (shouldSpillWire(op, options.wireSpillingHeuristic, operandMap))
+    if (shouldSpillWire(op, options.wireSpillingHeuristic, estimator))
       lowerUsersToTemporaryWire(op, operandMap);
   }
 
@@ -757,8 +770,7 @@ static void prettifyAfterLegalization(Block &block,
     // If the operations has regions, visit each of the region bodies.
     for (auto &region : op.getRegions()) {
       if (!region.empty())
-        prettifyAfterLegalization(region.front(), options, estimator,
-                                  operandMap);
+        prettifyAfterLegalization(region.front(), options, estimator);
     }
   }
 }
@@ -1023,9 +1035,9 @@ void ExportVerilog::prepareHWModule(hw::HWModuleOp module,
   legalizeHWModule(*module.getBodyBlock(), options);
 
   if (options.wireSpillingHeuristic != LoweringOptions::SpillNone) {
-    DenseMap<Value, size_t> operandMap;
+    EmittedExpressionSizeEstimator estimator;
     // Spill wires to prettify verilog outputs.
-    prettifyAfterLegalization(*module.getBodyBlock(), options, operandMap);
+    prettifyAfterLegalization(*module.getBodyBlock(), options, estimator);
   }
 }
 
