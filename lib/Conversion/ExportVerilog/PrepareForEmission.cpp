@@ -612,7 +612,7 @@ private:
 
   unsigned getOperandSum(Operation *op, unsigned interleave = 1,
                          bool whitespace = true);
-  DenseMap<Value, unsigned> expressionSizes;
+  DenseMap<Value, size_t> expressionSizes;
 };
 
 unsigned EmittedExpressionSizeEstimator::caluculateExpressionSize(Value v) {
@@ -738,6 +738,7 @@ bool shouldSpillWire(Operation &op,
 /// specified by `options.wireSpillingHeuristic` based on the structures.
 static void prettifyAfterLegalization(Block &block,
                                       const LoweringOptions &options,
+                                      EmittedExpressionSizeEstimator &estimator,
                                       DenseMap<Value, size_t> &operandMap) {
   // If disallowLocalVariables is enabled, we don't spill wires in procedural
   // regions.
@@ -756,7 +757,8 @@ static void prettifyAfterLegalization(Block &block,
     // If the operations has regions, visit each of the region bodies.
     for (auto &region : op.getRegions()) {
       if (!region.empty())
-        prettifyAfterLegalization(region.front(), options, operandMap);
+        prettifyAfterLegalization(region.front(), options, estimator,
+                                  operandMap);
     }
   }
 }
