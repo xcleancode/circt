@@ -145,7 +145,7 @@ static cl::opt<circt::firrtl::PreserveAggregate::PreserveMode>
                                     "vec", "Preserve only vectors"),
                          clEnumValN(circt::firrtl::PreserveAggregate::All,
                                     "all", "Preserve vectors and bundles")),
-        cl::init(circt::firrtl::PreserveAggregate::None),
+        cl::init(circt::firrtl::PreserveAggregate::OneDimVec),
         cl::cat(mainCategory));
 
 static cl::opt<bool> preservePublicTypes(
