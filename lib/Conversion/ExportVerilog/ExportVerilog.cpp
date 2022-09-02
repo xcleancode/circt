@@ -541,13 +541,10 @@ static bool isOkToBitSelectFrom(Value v) {
   if (v.isa<BlockArgument>())
     return true;
 
-  // Uses of a wire or register can be done inline.
-  if (auto read = v.getDefiningOp<ReadInOutOp>()) {
-    if (read.getInput().getDefiningOp<WireOp>() ||
-        read.getInput().getDefiningOp<RegOp>() ||
-        read.getInput().getDefiningOp<LogicOp>())
-      return true;
-  }
+  // Read_inout is valid to inline for bit-select. See `select` syntax on
+  // SV spec A.8.4 (P1174).
+  if (auto read = v.getDefiningOp<ReadInOutOp>())
+    return true;
 
   // Aggregate access can be inlined.
   if (v.getDefiningOp<StructExtractOp>() || v.getDefiningOp<ArrayGetOp>())
@@ -1533,7 +1530,7 @@ ModuleEmitter::printParamValue(Attribute value, raw_ostream &os,
   if (expr.getOpcode() == PEO::StrConcat)
     os << '{';
   bool allOperandsSigned = emitOperand(expr.getOperands()[0]);
-  for (auto op : ArrayRef(expr.getOperands()).drop_front()) {
+  for (auto op : expr.getOperands().drop_front()) {
     // Handle the special case of (a + b + -42) as (a + b - 42).
     // TODO: Also handle (a + b + x*-1).
     if (expr.getOpcode() == PEO::Add) {
@@ -1675,6 +1672,7 @@ private:
     return visitVerbatimExprOp(op, op.getSymbols());
   }
   SubExprInfo visitSV(MacroRefExprOp op);
+  SubExprInfo visitSV(MacroRefExprSEOp op);
   SubExprInfo visitSV(ConstantXOp op);
   SubExprInfo visitSV(ConstantZOp op);
 
@@ -2177,6 +2175,14 @@ SubExprInfo ExprEmitter::visitSV(MacroRefExprOp op) {
   return {LowestPrecedence, IsUnsigned};
 }
 
+SubExprInfo ExprEmitter::visitSV(MacroRefExprSEOp op) {
+  if (hasSVAttributes(op))
+    emitError(op, "SV attributes emission is unimplemented for the op");
+
+  os << "`" << op.getIdent().getName();
+  return {LowestPrecedence, IsUnsigned};
+}
+
 SubExprInfo ExprEmitter::visitSV(ConstantXOp op) {
   if (hasSVAttributes(op))
     emitError(op, "SV attributes emission is unimplemented for the op");
@@ -2565,7 +2571,7 @@ void NameCollector::collectNames(Block &block) {
     // Recursively process any regions under the op iff this is a procedural
     // #ifdef region: we need to emit automatic logic values at the top of the
     // enclosing region.
-    if (isa<IfDefProceduralOp>(op)) {
+    if (isa<IfDefProceduralOp, OrderedOutputOp>(op)) {
       for (auto &region : op.getRegions()) {
         if (!region.empty())
           collectNames(region.front());

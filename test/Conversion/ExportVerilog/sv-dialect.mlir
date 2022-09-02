@@ -42,7 +42,7 @@ hw.module @M1<param1: i42>(%clock : i1, %cond : i1, %val : i8) {
     sv.ifdef.procedural "SYNTHESIS" {
     } else {
   // CHECK-NEXT:     if ((`PRINTF_COND_) & 1'bx & 1'bz & 1'bz & cond & forceWire)
-      %tmp = sv.macro.ref<"PRINTF_COND_"> : i1
+      %tmp = sv.macro.ref< "PRINTF_COND_"> : i1
       %verb_tmp = sv.verbatim.expr "{{0}}" : () -> i1 {symbols = [#hw.innerNameRef<@M1::@wire1>] }
       %tmp1 = sv.constantX : i1
       %tmp2 = sv.constantZ : i1
@@ -1530,6 +1530,26 @@ hw.module @CollectNamesOrder(%in: i1) -> (out: i1) {
   %1 = comb.or %0, %0 : i1
   %foo = sv.wire {hw.verilogName = "_GEN" } : !hw.inout<i1>
   hw.output %1 : i1
+}
+
+// CHECK-LABEL: module InlineReadInout
+hw.module private @InlineReadInout() -> () {
+  %c0_i32 = hw.constant 0 : i32
+  %false = hw.constant false
+  %r1 = sv.reg  : !hw.inout<i2>
+  sv.initial {
+    %_RANDOM = sv.logic  : !hw.inout<uarray<1xi32>>
+    %2 = sv.array_index_inout %_RANDOM[%c0_i32] : !hw.inout<uarray<1xi32>>, i32
+    %RAMDOM = sv.verbatim.expr.se "`RAMDOM" : () -> i32 {symbols = []}
+    sv.bpassign %2, %RAMDOM : i32
+    %3 = sv.array_index_inout %_RANDOM[%c0_i32] : !hw.inout<uarray<1xi32>>, i32
+    %4 = sv.read_inout %3 : !hw.inout<i32>
+    // CHECK: automatic logic [31:0] _RANDOM[0:0];
+    // CHECK: _RANDOM[32'h0] = `RAMDOM;
+    // CHECK-NEXT: r1 = _RANDOM[32'h0][1:0];
+    %5 = comb.extract %4 from 0 : (i32) -> i2
+    sv.bpassign %r1, %5 : i2
+  }
 }
 
 hw.module @bindInMod() {
