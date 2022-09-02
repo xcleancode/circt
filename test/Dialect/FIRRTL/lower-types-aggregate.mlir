@@ -4,9 +4,7 @@
 // RUN: circt-opt -pass-pipeline='firrtl.circuit(firrtl-lower-types{preserve-aggregate=1d-vec})' %s | FileCheck --check-prefix=1D_VEC %s
 
 firrtl.circuit "TopLevel" {
-  // CHECK-LABEL: firrtl.extmodule @External(in source_valid: !firrtl.uint<1>)
   // CHECK-LABEL: firrtl.module @TopLevel(in %source_valid: !firrtl.uint<1>, out %sink_valid: !firrtl.uint<1>)
-  // NOT_PRESERVE_PUBLIC_TYPES-LABEL: firrtl.extmodule @External(in source: !firrtl.bundle<valid: uint<1>>)
   // NOT_PRESERVE_PUBLIC_TYPES-LABEL: firrtl.module @TopLevel(in %source: !firrtl.bundle<valid: uint<1>>, out %sink: !firrtl.bundle<valid: uint<1>>)
   firrtl.extmodule @External(in source: !firrtl.bundle<valid: uint<1>>)
   firrtl.module @TopLevel(in %source: !firrtl.bundle<valid: uint<1>>,

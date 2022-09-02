@@ -439,6 +439,8 @@ TypeLoweringVisitor::getPreservatinoModeForModule(FModuleLike module) {
   if (aggregatePreservationMode != PreserveAggregate::None &&
       preservePublicTypes && cast<hw::HWModuleLike>(*module).isPublic())
     return PreserveAggregate::None;
+  if (!isa<FModuleOp>(*module))
+    return PreserveAggregate::None;
   return aggregatePreservationMode;
 }
 
