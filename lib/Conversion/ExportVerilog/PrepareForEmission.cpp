@@ -570,9 +570,12 @@ void ExportVerilog::prepareHWModule(Block &block,
       lowerBoundInstance(instance);
     }
 
-    if (isProceduralRegion) {
-      if (auto logic = dyn_cast<LogicOp>(op)) {
-        auto [block, it] = findLogicOpInsertionPoint(logic);
+    if (isProceduralRegion && isa<LogicOp>(op)) {
+      if (options.disallowLocalVariables) {
+        auto moveOp = findParentInNonProceduralRegion(&op);
+        op.moveBefore(moveOp);
+      } else {
+        auto [block, it] = findLogicOpInsertionPoint(&op);
         op.moveBefore(block, it);
       }
     }
