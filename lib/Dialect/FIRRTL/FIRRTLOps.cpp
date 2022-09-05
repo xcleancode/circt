@@ -167,6 +167,8 @@ size_t firrtl::getNumPorts(Operation *op) {
 /// Check whether an operation has a `DontTouch` annotation, or a symbol that
 /// should prevent certain types of canonicalizations.
 bool firrtl::hasDontTouch(Operation *op) {
+  if (isa<SubfieldOp, SubindexOp>(op))
+    return hasDontTouch(op->getOperand(0));
   return op->getAttr(hw::InnerName::getInnerNameAttrName()) ||
          AnnotationSet(op).hasDontTouch();
 }

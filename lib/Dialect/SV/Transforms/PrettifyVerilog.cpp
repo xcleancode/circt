@@ -288,19 +288,15 @@ void PrettifyVerilogPass::sinkOrCloneOpToUses(Operation *op) {
   auto block = op->getBlock();
   // This maps a block to the block local instance of the op.
   SmallDenseMap<Block *, Value, 8> blockLocalValues;
+  if (op->hasOneUse())
+    return;
   for (auto &use : llvm::make_early_inc_range(op->getUses())) {
     // If the current use is in the same block as the operation, there is
     // nothing to do.
     auto localBlock = use.getOwner()->getBlock();
-    if (block == localBlock)
-      continue;
-    // Find the block local clone of the operation. If there is not one already,
-    // the op will be cloned in to the block.
-    auto &localValue = blockLocalValues[localBlock];
-    if (!localValue) {
-      // Clone the operation and insert it to the beginning of the block.
-      localValue = OpBuilder::atBlockBegin(localBlock).clone(*op)->getResult(0);
-    }
+
+    auto localValue =
+        OpBuilder::atBlockBegin(localBlock).clone(*op)->getResult(0);
     // Replace the current use, removing it from the use list.
     use.set(localValue);
     anythingChanged = true;
@@ -473,21 +469,22 @@ void PrettifyVerilogPass::processPostOrder(Block &body) {
           processPostOrder(regionBlock);
     }
 
-    // Simplify assignments involving structures and arrays.
-    if (auto assign = dyn_cast<sv::PAssignOp>(op)) {
-      auto dst = assign.getDest();
-      auto src = assign.getSrc();
-      if (!isSelfWrite(dst, src)) {
-        OpBuilder builder(assign);
-        if (splitAssignment(builder, dst, src)) {
-          anythingChanged = true;
-          toDelete.insert(src.getDefiningOp());
-          toDelete.insert(dst.getDefiningOp());
-          assign.erase();
-          continue;
-        }
-      }
-    }
+    // // Simplify assignments involving structures and arrays.
+    // if (auto assign = dyn_cast<sv::PAssignOp>(op)) {
+    //   auto dst = assign.getDest();
+    //   auto src = assign.getSrc();
+    //   if (!isSelfWrite(dst, src)) {
+    //     OpBuilder builder(assign);
+    //     if (splitAssignment(builder, dst, src)) {
+    //       anythingChanged = true;
+    //       toDelete.insert(src.getDefiningOp());
+    //       toDelete.insert(dst.getDefiningOp());
+    //       builder.getInsertionPoint();
+    //       assign.erase();
+    //       continue;
+    //     }
+    //   }
+    // }
 
     // Sink and duplicate unary operators.
     if (isVerilogUnaryOperator(&op) && prettifyUnaryOperator(&op))
@@ -496,9 +493,7 @@ void PrettifyVerilogPass::processPostOrder(Block &body) {
     // Sink or duplicate constant ops and invisible "free" ops into the same
     // block as their use.  This will allow the verilog emitter to inline
     // constant expressions and avoids ReadInOutOp from preventing motion.
-    if (matchPattern(&op, mlir::m_Constant()) ||
-        isa<sv::ReadInOutOp, sv::ArrayIndexInOutOp, sv::StructFieldInOutOp,
-            sv::IndexedPartSelectInOutOp, hw::ParamValueOp>(op)) {
+    if (matchPattern(&op, mlir::m_Constant())) {
       sinkOrCloneOpToUses(&op);
       continue;
     }

@@ -396,6 +396,8 @@ void IMConstPropPass::markBlockExecutable(Block *block) {
       markInstanceOp(instance);
     else if (auto mem = dyn_cast<MemOp>(op))
       markMemOp(mem);
+    else if (isAggregate(&op))
+      markOverdefined(op.getResult(0));
   }
 }
 
