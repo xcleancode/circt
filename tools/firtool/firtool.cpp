@@ -611,7 +611,7 @@ processBuffer(MLIRContext &context, TimingScope &ts, llvm::SourceMgr &sourceMgr,
     if (!disableExpandWhens) {
       auto &modulePM = pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>();
       modulePM.addPass(firrtl::createExpandWhensPass());
-      modulePM.addPass(firrtl::createSFCCompatPass());
+      modulePM.addPass(firrtl::createUBSanitizerPass());
     }
   }
 
@@ -706,6 +706,8 @@ processBuffer(MLIRContext &context, TimingScope &ts, llvm::SourceMgr &sourceMgr,
       !disableMergeConnections)
     pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
         firrtl::createMergeConnectionsPass(mergeConnectionsAgggresively));
+  pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
+      firrtl::createUBSanitizerPass());
 
   // Lower if we are going to verilog or if lowering was specifically requested.
   if (outputFormat != OutputIRFir) {

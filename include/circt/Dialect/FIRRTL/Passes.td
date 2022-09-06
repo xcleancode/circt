@@ -607,4 +607,11 @@ def LowerXMR : Pass<"firrtl-lower-xmr", "firrtl::CircuitOp"> {
   let constructor = "circt::firrtl::createLowerXMRPass()";
 }
 
+def UBSanitizer : Pass<"firrtl-ub-sanitizer", "firrtl::FModuleOp"> {
+  let summary = "Detect undefined behaivor!";
+  let description = [{
+  }];
+  let constructor = "circt::firrtl::createUBSanitizerPass()";
+}
+
 #endif // CIRCT_DIALECT_FIRRTL_PASSES_TD

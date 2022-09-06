@@ -1,8 +1,8 @@
 // RUN: circt-opt --pass-pipeline='firrtl.circuit(firrtl.module(firrtl-sfc-compat))' --verify-diagnostics --split-input-file %s | FileCheck %s
 
-firrtl.circuit "SFCCompatTests" {
+firrtl.circuit "UBSanitizerTests" {
 
-  firrtl.module @SFCCompatTests() {}
+  firrtl.module @UBSanitizerTests() {}
 
   // An invalidated regreset should be converted to a reg.
   //
