@@ -759,6 +759,19 @@ void ExportVerilog::prepareHWModule(Block &block,
       if (!haveAnyOutOfOrderUses)
         continue;
 
+      if (isa<ArrayIndexInOutOp, StructFieldInOutOp, IndexedPartSelectInOutOp>(
+              &op)) {
+        Operation *parent = &op;
+        while (parent) {
+          if (parent->getNumOperands() == 0)
+            break;
+          parent = parent->getOperand(0).getDefiningOp();
+        }
+        if (parent && isMovableDeclaration(parent))
+          parent->moveBefore(&block.front());
+        continue;
+      }
+
       // If this is a reg/wire declaration, then we move it to the top of the
       // block.  We can't abstract the inout result.
       if (isMovableDeclaration(&op)) {
@@ -780,6 +793,20 @@ void ExportVerilog::prepareHWModule(Block &block,
           op.moveBefore(&block.front());
           def->moveBefore(&block.front());
           continue;
+        } else {
+          if (isa<ArrayIndexInOutOp, StructFieldInOutOp,
+                  IndexedPartSelectInOutOp>(def)) {
+            Operation *parent = def;
+            while (parent) {
+              if (parent->getNumOperands() == 0)
+                break;
+              parent = parent->getOperand(0).getDefiningOp();
+            }
+            if (parent && isMovableDeclaration(parent)) {
+              parent->moveBefore(&block.front());
+            }
+            continue;
+          }
         }
       }
 
