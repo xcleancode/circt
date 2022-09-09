@@ -110,6 +110,24 @@ BaseTy type_dyn_cast(Type type) {
   return type_cast<BaseTy>(type);
 }
 
+/// Utility Type that wraps a Type of either Ty1 or Ty2.
+template <typename Ty1, typename Ty2>
+class TypeOr : public ::mlir::Type::TypeBase<TypeOr<Ty1, Ty2>, mlir::Type,
+                                             mlir::TypeStorage> {
+  using mlir::Type::TypeBase<TypeOr<Ty1, Ty2>, mlir::Type,
+                             mlir::TypeStorage>::Base::Base;
+
+public:
+  // Support LLVM isa/cast/dyn_cast to one of the possible types.
+  static bool classof(Type other) { return type_isa<Ty1, Ty2>(other); }
+
+  // Support C++ explicit conversions to the underlying types. These are
+  // explicit because the compiler can't statically know which conversion is
+  // actually safe to use.
+  explicit operator Ty1() const { return type_cast<Ty1>(*this); }
+  explicit operator Ty2() const { return type_cast<Ty2>(*this); }
+};
+
 template <typename BaseTy>
 class TypeAliasOr
     : public ::mlir::Type::TypeBase<TypeAliasOr<BaseTy>, mlir::Type,
