@@ -113,11 +113,12 @@ private:
                         std::function<void(OpBuilder &)> resetBody = {});
 
   void createIf(OpBuilder &builder, Value cond, std::function<void()> thenCtor,
-                std::function<void()> elseCtor) {
+                std::function<void()> elseCtor, unsigned depth = 0) {
     auto *block = builder.getBlock();
-    auto &entry = ifBlocks[{block, cond}];
+    auto it = ifBlocks.find({block, cond});
     OpBuilder::InsertionGuard g(builder);
-    if (entry) {
+    if (it != ifBlocks.end()) {
+      sv::IfOp entry = it->second;
       builder.setInsertionPointToEnd(entry.getThenBlock());
       thenCtor();
       if (elseCtor) {
@@ -131,21 +132,26 @@ private:
       }
       return;
     }
-    entry = builder.create<sv::IfOp>(cond.getLoc(), cond, thenCtor, elseCtor);
+
+    ifBlocks[{block, cond}] =
+        builder.create<sv::IfOp>(cond.getLoc(), cond, thenCtor, elseCtor);
   }
 
-  void createTree(OpBuilder &builder, sv::RegOp reg, Value term, Value next) {
+  void createTree(OpBuilder &builder, sv::RegOp reg, Value term, Value next,
+                  unsigned depth = 0) {
     if (term == next)
       return;
     auto mux = next.getDefiningOp<comb::MuxOp>();
     if (mux && mux.getTwoState()) {
       std::function<void()> elseCtor = [&]() {
-        createTree(builder, reg, term, mux.getFalseValue());
+        createTree(builder, reg, term, mux.getFalseValue(), depth + 1);
       };
       createIf(
           builder, mux.getCond(),
-          [&]() { createTree(builder, reg, term, mux.getTrueValue()); },
-          term == mux.getFalseValue() ? nullptr : elseCtor);
+          [&]() {
+            createTree(builder, reg, term, mux.getTrueValue(), depth + 1);
+          },
+          term == mux.getFalseValue() ? nullptr : elseCtor, depth);
     } else {
       builder.create<sv::PAssignOp>(term.getLoc(), reg, next);
     }
