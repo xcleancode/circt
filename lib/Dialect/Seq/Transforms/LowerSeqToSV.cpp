@@ -112,10 +112,52 @@ private:
                         sv::EventControl resetEdge = {}, Value reset = {},
                         std::function<void(OpBuilder &)> resetBody = {});
 
+  void createIf(OpBuilder &builder, Value cond, std::function<void()> thenCtor,
+                std::function<void()> elseCtor) {
+    auto *block = builder.getBlock();
+    auto &entry = ifBlocks[{block, cond}];
+    OpBuilder::InsertionGuard g(builder);
+    if (entry) {
+      builder.setInsertionPointToEnd(entry.getThenBlock());
+      thenCtor();
+      if (elseCtor) {
+        if (!entry.getElseBlock()) {
+          auto &elseBlock = entry.getElseRegion().emplaceBlock();
+          assert(entry.getElseBlock());
+        }
+        auto *elseBlock = entry.getElseBlock();
+        builder.setInsertionPointToEnd(elseBlock);
+        elseCtor();
+      }
+      return;
+    }
+    entry = builder.create<sv::IfOp>(cond.getLoc(), cond, thenCtor, elseCtor);
+  }
+
+  void createTree(OpBuilder &builder, sv::RegOp reg, Value term, Value next) {
+    if (term == next)
+      return;
+    auto mux = next.getDefiningOp<comb::MuxOp>();
+    if (mux && mux.getTwoState()) {
+      std::function<void()> elseCtor = [&]() {
+        createTree(builder, reg, term, mux.getFalseValue());
+      };
+      createIf(
+          builder, mux.getCond(),
+          [&]() { createTree(builder, reg, term, mux.getTrueValue()); },
+          term == mux.getFalseValue() ? nullptr : elseCtor);
+    } else {
+      builder.create<sv::PAssignOp>(term.getLoc(), reg, next);
+    }
+  }
+
   using AlwaysKeyType = std::tuple<Block *, sv::EventControl, Value, ResetType,
                                    sv::EventControl, Value>;
   llvm::SmallDenseMap<AlwaysKeyType, std::pair<sv::AlwaysOp, sv::IfOp>>
       alwaysBlocks;
+
+  using IfKeyType = std::pair<Block *, Value>;
+  llvm::SmallDenseMap<IfKeyType, sv::IfOp> ifBlocks;
 };
 } // namespace
 
@@ -231,21 +273,6 @@ void FirRegLower::lower(hw::HWModuleOp module) {
   module->removeAttr("firrtl.random_init_width");
 }
 
-static void createTree(OpBuilder &builder, sv::RegOp reg, Value term,
-                       Value next) {
-  if (term == next)
-    return;
-  auto mux = next.getDefiningOp<comb::MuxOp>();
-  if (mux && mux.getTwoState()) {
-    builder.create<sv::IfOp>(
-        mux.getLoc(), mux.getCond(),
-        [&]() { createTree(builder, reg, term, mux.getTrueValue()); },
-        [&]() { createTree(builder, reg, term, mux.getFalseValue()); });
-  } else {
-    builder.create<sv::PAssignOp>(term.getLoc(), reg, next);
-  }
-}
-
 FirRegLower::RegLowerInfo FirRegLower::lower(hw::HWModuleOp module,
                                              FirRegOp reg) {
   Location loc = reg.getLoc();
@@ -271,10 +298,12 @@ FirRegLower::RegLowerInfo FirRegLower::lower(hw::HWModuleOp module,
   if (reg.hasReset()) {
     addToAlwaysBlock(
         module.getBodyBlock(), sv::EventControl::AtPosEdge, reg.getClk(),
-        std::bind(createTree, std::placeholders::_1, svReg.reg, reg,
-                  reg.getNext()),
+        [&](OpBuilder &builder) {
+          return createTree(builder, svReg.reg, reg, reg.getNext());
+        },
         reg.getIsAsync() ? ResetType::AsyncReset : ResetType::SyncReset,
-        sv::EventControl::AtPosEdge, reg.getReset(), [&](OpBuilder &builder) {
+        sv::EventControl::AtPosEdge, reg.getReset(),
+        [&](OpBuilder &builder) {
           builder.create<sv::PAssignOp>(loc, svReg.reg, reg.getResetValue());
         });
     if (reg.getIsAsync()) {
@@ -283,9 +312,10 @@ FirRegLower::RegLowerInfo FirRegLower::lower(hw::HWModuleOp module,
     }
   } else {
     addToAlwaysBlock(module.getBodyBlock(), sv::EventControl::AtPosEdge,
-                     reg.getClk(),
-                     std::bind(createTree, std::placeholders::_1, svReg.reg,
-                               reg, reg.getNext()));
+                     reg.getClk(), [&](OpBuilder &builder) {
+                       return createTree(builder, svReg.reg, reg,
+                                         reg.getNext());
+                     });
   }
 
   reg.replaceAllUsesWith(regVal.getResult());

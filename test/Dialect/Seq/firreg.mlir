@@ -142,7 +142,6 @@ hw.module private @UninitReg1(%clock: i1, %reset: i1, %cond: i1, %value: i2) {
   // CHECK-NEXT:   } else {
   // CHECK-NEXT:     sv.if %cond {
   // CHECK-NEXT:       sv.passign %count, %value
-  // CHECK-NEXT:     } else {
   // CHECK-NEXT:     }
   // CHECK-NEXT:   }
   // CHECK-NEXT: }
