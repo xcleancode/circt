@@ -202,7 +202,7 @@ static void lowerAlwaysInlineOperation(Operation *op) {
   // Finally, ensures the op is in the same block as its user so it can be
   // inlined.
   Operation *user = *op->getUsers().begin();
-  if (op->getBlock() != user->getBlock()) {
+  if (op->getBlock() != user->getBlock() || user->isBeforeInBlock(op)) {
     op->moveBefore(user);
 
     // If any of the operations of the moved op are always inline, recursively
