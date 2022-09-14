@@ -563,6 +563,8 @@ static bool isOkToBitSelectFrom(Value v) {
 /// can only use bit selects like x[4:6] on simple expressions, you cannot use
 /// expressions in the sensitivity list of always blocks, etc.
 static bool isExpressionUnableToInline(Operation *op) {
+  if (isCombinational(op))
+    return true;
   if (auto cast = dyn_cast<BitcastOp>(op))
     if (!haveMatchingDims(cast.getInput().getType(), cast.getResult().getType(),
                           op->getLoc()))
