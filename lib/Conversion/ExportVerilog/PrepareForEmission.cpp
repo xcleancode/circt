@@ -520,6 +520,13 @@ static bool reuseExistingInOut(Operation *op) {
     auto read = builder.create<ReadInOutOp>(assign.getDest());
     use->set(read);
   }
+
+  // The destination of assign op is possibly "always inline".
+  // It's necessary to duplicate the op for each use.
+  if (auto defOp = assign.getDest().getDefiningOp())
+    if (isExpressionAlwaysInline(defOp))
+      lowerAlwaysInlineOperation(defOp);
+
   return true;
 }
 
