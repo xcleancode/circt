@@ -10,9 +10,6 @@ circuit Foo:
     input d0: UInt<60000>
     input d1: UInt<120000>
     output q: UInt<33>
-    output q0: UInt<60000>
-    output q1: UInt<120000>
-
 
     ; ALL:       _r <= d;
     ; NAMED-NOT: _r = {{.*}};
@@ -68,44 +65,3 @@ circuit Foo:
     ; ALL:       s = {_RANDOM_2[31:2], _RANDOM_3[2:0]};
     ; NAMED:     s = {_RANDOM_2[31:2], _RANDOM_3[2:0]};
     ; NONE:      s = {_RANDOM_2[31:2], _RANDOM_3[2:0]};
-
-    inst i0 of TwoLargeRegisters
-    i0.clock <= clock
-    i0.d <= d0
-    q0 <= i0.q
-
-    inst i1 of OneReallyLargeRegister
-    i1.clock <= clock
-    i1.d <= d1
-    q1 <= i1.q
-
-  ; ALL: module TwoLargeRegisters
-  module TwoLargeRegisters:
-    input clock: Clock
-    input d: UInt<60000>
-    output q: UInt<60000>
-    ; ALL: automatic logic [31:0]   _RANDOM_0;
-    ; ALL: automatic logic [31:0]   _RANDOM_3749;
-    ; ALL-NOT: automatic logic [31:0]   _RANDOM_3750;
-
-    reg r0: UInt<60000>, clock
-    reg r1: UInt<60000>, clock
-
-    r0 <= d
-    r1 <= r0
-    q <= r1
-
-  ; ALL: module OneReallyLargeRegister
-  module OneReallyLargeRegister:
-    input clock: Clock
-    input d: UInt<120000>
-    output q: UInt<120000>
-
-    ; ALL: automatic logic [31:0]   _RANDOM_0;
-    ; ALL: automatic logic [31:0]   _RANDOM_3749;
-    ; ALL-NOT: automatic logic [31:0]   _RANDOM_3750;
-
-    reg r: UInt<120000>, clock
-
-    r <= d
-    q <= r
