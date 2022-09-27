@@ -286,10 +286,11 @@ static bool areEquivalentValues(Value term, Value next) {
   // be CSEd.
   if (auto t1 = term.getDefiningOp<hw::ArrayGetOp>())
     if (auto t2 = next.getDefiningOp<hw::ArrayGetOp>())
-      if (auto c1 = t1.getIndex().getDefiningOp<hw::ConstantOp>())
-        if (auto c2 = t2.getIndex().getDefiningOp<hw::ConstantOp>())
-          return c1.getValue() == c2.getValue() &&
-                 areEquivalentValues(t1.getInput(), t2.getInput());
+      if (t1.getIndex().getType() == t2.getIndex().getType())
+        if (auto c1 = t1.getIndex().getDefiningOp<hw::ConstantOp>())
+          if (auto c2 = t2.getIndex().getDefiningOp<hw::ConstantOp>())
+            return c1.getValue() == c2.getValue() &&
+                   areEquivalentValues(t1.getInput(), t2.getInput());
   // Otherwise, regard as different.
   // TODO: Handle struct if necessary.
   return false;
