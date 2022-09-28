@@ -374,7 +374,7 @@ static StringRef getVerilogDeclWord(Operation *op,
     return "reg";
   }
   if (isa<WireOp>(op))
-    return "wire";
+    return "logic";
   if (isa<ConstantOp, LocalParamOp, ParamValueOp>(op))
     return "localparam";
 
@@ -398,7 +398,7 @@ static StringRef getVerilogDeclWord(Operation *op,
   }
 
   if (!isProcedural)
-    return "wire";
+    return "logic";
 
   // "automatic" values aren't allowed in disallowLocalVariables mode.
   assert(!options.disallowLocalVariables && "automatic variables not allowed");
