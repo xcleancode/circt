@@ -268,12 +268,12 @@ static void getTypeDims(SmallVectorImpl<Attribute> &dims, Type type,
       dims.push_back(getInt32Attr(type.getContext(), integer.getWidth()));
     return;
   }
-  if (auto array = hw::type_dyn_cast<ArrayType>(type)) {
-    dims.push_back(getInt32Attr(type.getContext(), array.getSize()));
-    getTypeDims(dims, array.getElementType(), loc);
+  // if (auto array = hw::type_dyn_cast<ArrayType>(type)) {
+  //   dims.push_back(getInt32Attr(type.getContext(), array.getSize()));
+  //   getTypeDims(dims, array.getElementType(), loc);
 
-    return;
-  }
+  //   return;
+  // }
   if (auto intType = hw::type_dyn_cast<IntType>(type)) {
     dims.push_back(intType.getWidth());
     return;
@@ -282,6 +282,8 @@ static void getTypeDims(SmallVectorImpl<Attribute> &dims, Type type,
   if (auto inout = hw::type_dyn_cast<InOutType>(type))
     return getTypeDims(dims, inout.getElementType(), loc);
   if (auto uarray = hw::type_dyn_cast<hw::UnpackedArrayType>(type))
+    return getTypeDims(dims, uarray.getElementType(), loc);
+  if (auto uarray = hw::type_dyn_cast<hw::ArrayType>(type))
     return getTypeDims(dims, uarray.getElementType(), loc);
   if (hw::type_isa<InterfaceType, StructType, EnumType>(type))
     return;
@@ -328,6 +330,9 @@ static Type stripUnpackedTypes(Type type) {
         return stripUnpackedTypes(inoutType.getElementType());
       })
       .Case<UnpackedArrayType>([](UnpackedArrayType arrayType) {
+        return stripUnpackedTypes(arrayType.getElementType());
+      })
+      .Case<ArrayType>([](ArrayType arrayType) {
         return stripUnpackedTypes(arrayType.getElementType());
       })
       .Default([](Type type) { return type; });
@@ -1353,7 +1358,11 @@ void ModuleEmitter::printUnpackedTypePostfix(Type type, raw_ostream &os) {
         printUnpackedTypePostfix(inoutType.getElementType(), os);
       })
       .Case<UnpackedArrayType>([&](UnpackedArrayType arrayType) {
-        os << "[0:" << (arrayType.getSize() - 1) << "]";
+        os << " [" << (arrayType.getSize() - 1) << ":0]";
+        printUnpackedTypePostfix(arrayType.getElementType(), os);
+      })
+      .Case<ArrayType>([&](ArrayType arrayType) {
+        os << " [" << (arrayType.getSize() - 1) << ":0]";
         printUnpackedTypePostfix(arrayType.getElementType(), os);
       })
       .Case<InterfaceType>([&](auto) {
@@ -2256,11 +2265,11 @@ SubExprInfo ExprEmitter::visitTypeOp(ArrayCreateOp op) {
   if (hasSVAttributes(op))
     emitError(op, "SV attributes emission is unimplemented for the op");
 
-  os << '{';
+  os << "'{";
   llvm::interleaveComma(op.getInputs(), os, [&](Value operand) {
-    os << "{";
+    // os << "{";
     emitSubExpr(operand, LowestPrecedence);
-    os << "}";
+    // os << "}";
   });
   os << '}';
   return {Unary, IsUnsigned};
@@ -4064,7 +4073,7 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
 
   // Try inlining an assignment into declarations.
   if (isa<WireOp, LogicOp>(op) &&
-      !op->getParentOp()->hasTrait<ProceduralRegion>()) {
+      !op->getParentOp()->hasTrait<ProceduralRegion>() && /*hack*/false) {
     // Get a single assignments if any.
     if (auto singleAssign = getSingleAssignAndCheckUsers<AssignOp>(op)) {
       auto source = singleAssign.getSrc().getDefiningOp();

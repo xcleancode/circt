@@ -105,6 +105,8 @@ private:
   RegLowerInfo lower(FirRegOp reg);
 
   void initialize(OpBuilder &builder, RegLowerInfo reg, ArrayRef<Value> rands);
+  void initializeImpl(OpBuilder &builder, Location loc, Value reg, Value concat,
+                      unsigned &pos);
 
   void createTree(OpBuilder &builder, Value reg, Value term, Value next);
 
@@ -387,6 +389,36 @@ FirRegLower::RegLowerInfo FirRegLower::lower(FirRegOp reg) {
   return svReg;
 }
 
+void FirRegLower::initializeImpl(OpBuilder &builder, Location loc, Value reg,
+                                 Value concat, unsigned &pos) {
+  if (auto arrty = reg.getType()
+                       .cast<hw::InOutType>()
+                       .getElementType()
+                       .dyn_cast<hw::ArrayType>()) {
+    // Create an index constant.
+    for (int idx = 0; idx < arrty.getSize(); idx++) {
+      auto idxVal = getOrCreateConstant(
+          APInt(std::max(1u, llvm::Log2_64_Ceil(arrty.getSize())), idx));
+
+      auto &index = arrayIndexCache[{reg, idx}];
+      if (!index) {
+        // Create an array index op just after `reg`.
+        OpBuilder::InsertionGuard guard(builder);
+        builder.setInsertionPointAfterValue(reg);
+        index =
+            builder.create<sv::ArrayIndexInOutOp>(reg.getLoc(), reg, idxVal);
+      }
+      initializeImpl(builder, loc, index, concat, pos);
+    }
+    return;
+  }
+  concat = builder.createOrFold<comb::ExtractOp>(
+      loc, concat, pos,
+      hw::getBitWidth(reg.getType().cast<hw::InOutType>().getElementType()));
+  pos += hw::getBitWidth(reg.getType().cast<hw::InOutType>().getElementType());
+  builder.create<sv::BPAssignOp>(loc, reg, concat);
+}
+
 void FirRegLower::initialize(OpBuilder &builder, RegLowerInfo reg,
                              ArrayRef<Value> rands) {
   auto loc = reg.reg.getLoc();
@@ -408,9 +440,10 @@ void FirRegLower::initialize(OpBuilder &builder, RegLowerInfo reg,
     width -= nwidth;
   }
   auto concat = builder.createOrFold<comb::ConcatOp>(loc, nibbles);
-  auto bitcast = builder.createOrFold<hw::BitcastOp>(
-      loc, reg.reg.getElementType(), concat);
-  builder.create<sv::BPAssignOp>(loc, reg.reg, bitcast);
+  // auto bitcast = builder.createOrFold<hw::BitcastOp>(
+  //     loc, reg.reg.getElementType(), concat);
+  unsigned start = 0;
+  initializeImpl(builder, loc, reg.reg, concat, start);
 }
 
 void FirRegLower::addToAlwaysBlock(Block *block, sv::EventControl clockEdge,

@@ -3036,9 +3036,30 @@ LogicalResult FIRRTLLowering::visitExpr(BitCastOp op) {
   auto operand = getLoweredValue(op.getOperand());
   if (!operand)
     return failure();
+  // int -> array
+  // extract(), array
+
   auto resultType = lowerType(op.getType());
   if (!resultType)
     return failure();
+  if (auto in = operand.getType().dyn_cast<IntegerType>()) {
+    if (auto out = resultType.dyn_cast<hw::ArrayType>()) {
+      // Create array_create(extract(n, n-m), ...,
+      auto elem = out.getElementType().dyn_cast<IntegerType>();
+      if (!elem) {
+        op.emitError() << "bitcast error";
+        return failure();
+      }
+      SmallVector<Value> values;
+      for (int i = 0; i < out.getSize(); i++) {
+        auto extract = builder.create<comb::ExtractOp>(
+            operand, i * elem.getWidth(), elem.getWidth());
+        values.push_back(extract);
+      }
+      std::reverse(values.begin(), values.end());
+      return setLoweringTo<hw::ArrayCreateOp>(op, resultType, values);
+    }
+  }
 
   return setLoweringTo<hw::BitcastOp>(op, resultType, operand);
 }

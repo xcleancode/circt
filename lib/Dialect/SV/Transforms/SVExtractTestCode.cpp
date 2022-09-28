@@ -155,6 +155,8 @@ static hw::HWModuleOp createModuleForCut(hw::HWModuleOp op,
   for (auto v : inputs) {
     if (auto readinout = dyn_cast_or_null<ReadInOutOp>(v.getDefiningOp())) {
       auto op = readinout.getInput();
+      if (op.getType().dyn_cast<hw::InOutType>()) {
+      }
       if (dups.count(op)) {
         realReads[dups[op]].push_back(v);
         continue;
