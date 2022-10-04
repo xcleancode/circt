@@ -1442,17 +1442,19 @@ void ArrayIndexInOutOp::build(OpBuilder &builder, OperationState &result,
 // IndexedPartSelectInOutOp
 //===----------------------------------------------------------------------===//
 
+static Type inferReturn(Type type, int32_t width) {
+  auto elemTy = type.cast<hw::InOutType>().getElementType();
+  if (elemTy.isa<IntegerType>())
+    return hw::InOutType::get(IntegerType::get(type.getContext(), width));
+  if (elemTy.isa<hw::ArrayType>())
+    return hw::InOutType::get(hw::ArrayType::get(
+        elemTy.cast<hw::ArrayType>().getElementType(), width));
+  return {};
+}
 void IndexedPartSelectInOutOp::build(OpBuilder &builder, OperationState &result,
                                      Value input, Value base, int32_t width,
                                      bool decrement) {
-  Type resultType = nullptr;
-  auto typ = input.getType().cast<hw::InOutType>().getElementType();
-  if (typ.isa<IntegerType>())
-    resultType =
-        hw::InOutType::get(IntegerType::get(builder.getContext(), width));
-  if (typ.isa<hw::ArrayType>())
-    resultType = hw::InOutType::get(
-        hw::ArrayType::get(typ.cast<hw::ArrayType>().getElementType(), width));
+  Type resultType = inferReturn(input.getType(), width);
   build(builder, result, resultType, input, base, width, decrement);
 }
 
@@ -1464,45 +1466,29 @@ LogicalResult IndexedPartSelectInOutOp::inferReturnTypes(
   if (!width)
     return failure();
 
-  auto typ = operands[0].getType().cast<hw::InOutType>().getElementType();
-  if (typ.isa<IntegerType>())
-    results.push_back(hw::InOutType::get(
-        IntegerType::get(context, width.cast<IntegerAttr>().getInt())));
-  if (typ.isa<hw::ArrayType>()) {
-    results.push_back(hw::InOutType::get(hw::ArrayType::get(
-        typ.cast<hw::ArrayType>().getElementType(),
-        width.cast<IntegerAttr>().getValue().getZExtValue())));
-  }
-
+  auto typ = inferReturn(operands[0].getType(),
+                         width.cast<IntegerAttr>().getValue().getZExtValue());
+  if (!typ)
+    return failure();
+  results.push_back(typ);
   return success();
 }
 
 LogicalResult IndexedPartSelectInOutOp::verify() {
   unsigned inputWidth = 0, resultWidth = 0;
   auto opWidth = getWidth();
-
-  if (auto i = getInput()
-                   .getType()
-                   .cast<InOutType>()
-                   .getElementType()
-                   .dyn_cast<IntegerType>())
+  auto inputElemTy = getInput().getType().cast<InOutType>().getElementType();
+  auto resultElemTy = getType().cast<InOutType>().getElementType();
+  if (auto i = inputElemTy.dyn_cast<IntegerType>())
     inputWidth = i.getWidth();
-  else if (auto i = getInput()
-                        .getType()
-                        .cast<InOutType>()
-                        .getElementType()
-                        .cast<hw::ArrayType>())
+  else if (auto i = hw::type_cast<hw::ArrayType>(inputElemTy))
     inputWidth = i.getSize();
   else
     return emitError("input element type must be Integer");
 
-  if (auto resType =
-          getType().cast<InOutType>().getElementType().dyn_cast<IntegerType>())
+  if (auto resType = resultElemTy.dyn_cast<IntegerType>())
     resultWidth = resType.getWidth();
-  else if (auto resType = getType()
-                              .cast<InOutType>()
-                              .getElementType()
-                              .dyn_cast<hw::ArrayType>())
+  else if (auto resType = hw::type_cast<hw::ArrayType>(resultElemTy))
     resultWidth = resType.getSize();
   else
     return emitError("result element type must be Integer");
