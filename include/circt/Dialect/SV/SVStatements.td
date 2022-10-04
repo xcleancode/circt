@@ -428,6 +428,7 @@ def PAssignOp : SVOp<"passign", [InOutTypeConstraint<"src", "dest">,
   let results = (outs);
   let assemblyFormat = "$dest `,` $src  attr-dict `:` qualified(type($src))";
   let hasVerifier = 1;
+  let hasCanonicalizeMethod = 1;
 }
 
 
