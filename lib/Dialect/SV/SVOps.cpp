@@ -1070,6 +1070,16 @@ std::optional<std::tuple<Value, Value, APInt, APInt>> getRange(PAssignOp op) {
       c2.getValue());
 }
 
+std::optional<std::tuple<Value, APInt, APInt>> getRange2(Value l) {
+  return TypeSwitch<Operation *, std::tuple<Value, APInt, APInt>>(
+             l.getDefiningOp())
+      .Case<hw::ArrayGetOp, sv::ArrayIndexInoutOp>([](auto array) {
+
+      })
+      .Case<hw::ArraySliceOp>([](hw::ArraySliceOp slice) {})
+      .Default([](auto) { return {}; });
+}
+
 LogicalResult PAssignOp::canonicalize(PAssignOp op, PatternRewriter &rewriter) {
   op.dump();
   auto r1 = getRange(op);
