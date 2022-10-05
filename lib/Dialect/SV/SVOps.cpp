@@ -24,6 +24,8 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 
+#include <optional>
+
 using namespace circt;
 using namespace sv;
 using mlir::TypedAttr;
@@ -1055,37 +1057,68 @@ LogicalResult PAssignOp::verify() {
   return success();
 }
 
-std::optional<std::tuple<Value, Value, APInt, APInt>> getRange(PAssignOp op) {
-  auto destArrayInout = op.getDest().getDefiningOp<ArrayIndexInOutOp>();
-  auto srcArrayGet = op.getSrc().getDefiningOp<hw::ArrayGetOp>();
-  if (!destArrayInout || !srcArrayGet)
-    return {};
-  auto c1 = destArrayInout.getIndex().getDefiningOp<hw::ConstantOp>();
-  auto c2 = srcArrayGet.getIndex().getDefiningOp<hw::ConstantOp>();
-  if (!c1 || !c2 || c1.getValueAttr() != c2.getValueAttr())
-    return {};
-  destArrayInout.dump();
-  return std::make_tuple<Value, Value, APInt, APInt>(
-      destArrayInout.getInput(), srcArrayGet.getInput(), c1.getValue(),
-      c2.getValue());
+// This struct represents a slice of array[start, end).
+struct ArrayConstantSlice {
+  Value array;
+  APInt start, end;
+  bool isSuccessive(const ArrayConstantSlice &rhs) const {
+    return array == rhs.array && end == rhs.start;
+  }
+  bool isZero() const { return start == end; }
+};
+
+// TODO: Use type_cast
+std::optional<ArrayConstantSlice> getRange2(Value l) {
+  if (!l.getDefiningOp())
+    return std::nullopt;
+  return TypeSwitch<Operation *, std::optional<ArrayConstantSlice>>(
+             l.getDefiningOp())
+      .Case<hw::ArrayGetOp, ArrayIndexInOutOp>(
+          [](auto array) -> std::optional<ArrayConstantSlice> {
+            hw::ConstantOp it =
+                array.getIndex().template getDefiningOp<hw::ConstantOp>();
+            if (!it)
+              return std::nullopt;
+            auto size = 1;
+            return ArrayConstantSlice{array.getInput(), it.getValue(),
+                                      it.getValue() + size};
+          })
+      .Case<hw::ArraySliceOp>(
+          [](hw::ArraySliceOp slice) -> std::optional<ArrayConstantSlice> {
+            auto it = slice.getLowIndex().getDefiningOp<hw::ConstantOp>();
+            if (!it)
+              return std::nullopt;
+            auto size = slice.getType().cast<hw::ArrayType>().getSize();
+            return ArrayConstantSlice{slice.getInput(), it.getValue(),
+                                      it.getValue() + size};
+          })
+      .Case<sv::IndexedPartSelectInOutOp>(
+          [](sv::IndexedPartSelectInOutOp index)
+              -> std::optional<ArrayConstantSlice> {
+            auto it = index.getBase().getDefiningOp<hw::ConstantOp>();
+            if (!it || index.getDecrement())
+              return std::nullopt;
+            return ArrayConstantSlice{index.getInput(), it.getValue(),
+                                      it.getValue() + index.getWidth()};
+          })
+      .Default([](auto) { return std::nullopt; });
 }
 
-std::optional<std::tuple<Value, APInt, APInt>> getRange2(Value l) {
-  return TypeSwitch<Operation *, std::tuple<Value, APInt, APInt>>(
-             l.getDefiningOp())
-      .Case<hw::ArrayGetOp, sv::ArrayIndexInoutOp>([](auto array) {
-
-      })
-      .Case<hw::ArraySliceOp>([](hw::ArraySliceOp slice) {})
-      .Default([](auto) { return {}; });
+std::optional<std::pair<ArrayConstantSlice, ArrayConstantSlice>>
+getRange(PAssignOp op) {
+  auto srcRange = getRange2(op.getSrc());
+  auto destRange = getRange2(op.getDest());
+  if (srcRange && destRange)
+    return std::make_pair(*destRange, *srcRange);
+  return std::nullopt;
 }
 
 LogicalResult PAssignOp::canonicalize(PAssignOp op, PatternRewriter &rewriter) {
-  op.dump();
+  // op.dump();
   auto r1 = getRange(op);
   if (!r1)
     return failure();
-  auto [dest1, src1, start, end] = *r1;
+  auto [dest1, src1] = *r1;
   sv::PAssignOp assign2 = dyn_cast_or_null<sv::PAssignOp>(op->getNextNode());
   llvm::errs() << "foo\n";
 
@@ -1097,19 +1130,27 @@ LogicalResult PAssignOp::canonicalize(PAssignOp op, PatternRewriter &rewriter) {
     return failure();
   llvm::errs() << "foo\n";
 
-  auto [dest2, src2, start2, end2] = *r2;
-  if (dest1 != dest2 && src1 != src2 && end + 1 != start2)
+  auto [dest2, src2] = *r2;
+  if (!dest1.isSuccessive(dest2) || !src1.isSuccessive(src2) ||
+      dest1.isZero() || dest2.isZero())
     return failure();
-  auto t = rewriter.create<hw::ConstantOp>(op.getSrc().getLoc(), start);
-  auto width = (end2 - start).getZExtValue() + 1;
+  auto destStart =
+      rewriter.create<hw::ConstantOp>(op.getSrc().getLoc(), dest1.start);
+  auto srcStart =
+      rewriter.create<hw::ConstantOp>(op.getSrc().getLoc(), src1.start);
+  auto width = (dest2.end - dest1.start).getZExtValue();
   // Consider type alias?
+  // assert(width > 0);
+  if(width == 0)
+  return failure();
   auto array = hw::ArrayType::get(
-      src1.getType().cast<hw::ArrayType>().getElementType(), width);
-  auto rhs = rewriter.create<hw::ArraySliceOp>(op.getLoc(), array, src1, t);
+      src1.array.getType().cast<hw::ArrayType>().getElementType(), width);
+  auto rhs = rewriter.create<hw::ArraySliceOp>(op.getLoc(), array, src1.array,
+                                               srcStart);
   // auto lhs = rewriter.create<sv::IndexedPartSelectInOutOp>(
   //     op.getLoc(), hw::InOutType::get(array), dest1, t, width, false);
-  auto lhs = rewriter.create<sv::IndexedPartSelectInOutOp>(op.getLoc(), dest1,
-                                                           t, width);
+  auto lhs = rewriter.create<sv::IndexedPartSelectInOutOp>(
+      op.getLoc(), dest1.array, destStart, width);
 
   rewriter.eraseOp(assign2);
   rewriter.replaceOpWithNewOp<sv::PAssignOp>(op, lhs, rhs);
