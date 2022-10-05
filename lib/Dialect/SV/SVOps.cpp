@@ -1056,7 +1056,7 @@ LogicalResult PAssignOp::verify() {
 }
 
 std::optional<std::tuple<Value, Value, APInt, APInt>> getRange(PAssignOp op) {
-  auto destArrayInout = op.getSrc().getDefiningOp<ArrayIndexInOutOp>();
+  auto destArrayInout = op.getDest().getDefiningOp<ArrayIndexInOutOp>();
   auto srcArrayGet = op.getSrc().getDefiningOp<hw::ArrayGetOp>();
   if (!destArrayInout || !srcArrayGet)
     return {};
@@ -1064,35 +1064,43 @@ std::optional<std::tuple<Value, Value, APInt, APInt>> getRange(PAssignOp op) {
   auto c2 = srcArrayGet.getIndex().getDefiningOp<hw::ConstantOp>();
   if (!c1 || !c2 || c1.getValueAttr() != c2.getValueAttr())
     return {};
+  destArrayInout.dump();
   return std::make_tuple<Value, Value, APInt, APInt>(
-      destArrayInout.getInput(), srcArrayGet.getIndex(), c1.getValue(),
+      destArrayInout.getInput(), srcArrayGet.getInput(), c1.getValue(),
       c2.getValue());
 }
 
 LogicalResult PAssignOp::canonicalize(PAssignOp op, PatternRewriter &rewriter) {
+  op.dump();
   auto r1 = getRange(op);
   if (!r1)
     return failure();
   auto [dest1, src1, start, end] = *r1;
   sv::PAssignOp assign2 = dyn_cast_or_null<sv::PAssignOp>(op->getNextNode());
+  llvm::errs() << "foo\n";
+
   if (!assign2)
     return failure();
 
   auto r2 = getRange(assign2);
   if (!r2)
     return failure();
+  llvm::errs() << "foo\n";
 
   auto [dest2, src2, start2, end2] = *r2;
   if (dest1 != dest2 && src1 != src2 && end + 1 != start2)
     return failure();
   auto t = rewriter.create<hw::ConstantOp>(op.getSrc().getLoc(), start);
-  auto width = (end2 - start).getZExtValue();
+  auto width = (end2 - start).getZExtValue() + 1;
   // Consider type alias?
   auto array = hw::ArrayType::get(
       src1.getType().cast<hw::ArrayType>().getElementType(), width);
   auto rhs = rewriter.create<hw::ArraySliceOp>(op.getLoc(), array, src1, t);
+  // auto lhs = rewriter.create<sv::IndexedPartSelectInOutOp>(
+  //     op.getLoc(), hw::InOutType::get(array), dest1, t, width, false);
   auto lhs = rewriter.create<sv::IndexedPartSelectInOutOp>(op.getLoc(), dest1,
                                                            t, width);
+
   rewriter.eraseOp(assign2);
   rewriter.replaceOpWithNewOp<sv::PAssignOp>(op, lhs, rhs);
   return success();
