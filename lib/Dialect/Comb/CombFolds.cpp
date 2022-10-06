@@ -16,6 +16,8 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/KnownBits.h"
 
+#include <optional>
+
 using namespace mlir;
 using namespace circt;
 using namespace comb;
@@ -1652,6 +1654,28 @@ LogicalResult ConcatOp::canonicalize(ConcatOp op, PatternRewriter &rewriter) {
           }
         }
       }
+
+      // // Merge neighboring array elements of neiboring inputs, e.g.
+      // // {Array[3], Array[2]} -> bitcast(Array[3:2])
+      // // {bitcast(Array[3:2]), Array[1]} -> bitcast(Array[3:1])
+      // // {Array[3], bitcast(Array[2:1])} -> bitcast(Array[3:1])
+      // // {bitcast(Array[4:3]), bitcast(Array[2:1])} -> bitcast(Array[4:1])
+      // if (auto extract = inputs[i].getDefiningOp<hw::ArrayGetOp>()) {
+      //   if (auto prevExtract = inputs[i - 1].getDefiningOp<hw::ArrayGetOp>()) {
+      //     if (extract.getInput() == prevExtract.getInput()) {
+      //       auto thisWidth = extract.getType().cast<IntegerType>().getWidth();
+      //       auto preIndex = prevExtract.getIndex();
+      //       if (prevExtract.getIndex() == extract.getLowBit() + thisWidth) {
+      //         auto prevWidth = prevExtract.getType().getIntOrFloatBitWidth();
+      //         auto resType = rewriter.getIntegerType(thisWidth + prevWidth);
+      //         Value replacement = rewriter.create<ExtractOp>(
+      //             op.getLoc(), resType, extract.getInput(),
+      //             extract.getLowBit());
+      //         return flattenConcat(i - 1, i, replacement);
+      //       }
+      //     }
+      //   }
+      // }
     }
   }
 
