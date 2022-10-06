@@ -1375,6 +1375,31 @@ void ReadInOutOp::build(OpBuilder &builder, OperationState &result,
   build(builder, result, resultType, input);
 }
 
+LogicalResult ReadInOutOp::canonicalize(ReadInOutOp op,
+                                        PatternRewriter &rewriter) {
+  // Exchange the order of read_inout and array get.
+  // read_inout (array_index_inout a[i]) --> array_get (read_inout a)[i]
+  auto parent = op.getInput().getDefiningOp();
+  while (parent && parent->getNumOperands() > 0)
+    parent = parent->getOperand(0).getDefiningOp();
+
+  // Allow only wires for now.
+  // Note: Can we allow this transformation for registers if there is no
+  // blocking assignment?
+  if (!isa_and_nonnull<WireOp>(parent))
+    return failure();
+
+  auto array = op.getInput().getDefiningOp<sv::ArrayIndexInOutOp>();
+  if (!array ||
+      !array.getInput().getType().getElementType().isa<hw::ArrayType>())
+    return failure();
+
+  rewriter.replaceOpWithNewOp<hw::ArrayGetOp>(
+      op, rewriter.create<sv::ReadInOutOp>(op.getLoc(), array.getInput()),
+      array.getIndex());
+  return success();
+}
+
 //===----------------------------------------------------------------------===//
 // ArrayIndexInOutOp
 //===----------------------------------------------------------------------===//
