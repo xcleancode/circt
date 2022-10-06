@@ -1405,6 +1405,18 @@ void WireOp::getAsmResultNames(OpAsmSetValueNameFn setNameFn) {
     setNameFn(getResult(), nameAttr.getValue());
 }
 
+LogicalResult ReadInOutOp::canonicalize(ReadInOutOp op,
+                                        PatternRewriter &rewriter) {
+  auto array = op.getInput().getDefiningOp<sv::ArrayIndexInOutOp>();
+  if (!array ||
+      !array.getInput().getType().getElementType().dyn_cast<hw::ArrayType>())
+    return failure();
+  array.dump();
+  rewriter.replaceOpWithNewOp<hw::ArrayGetOp>(
+      op, rewriter.create<sv::ReadInOutOp>(op.getLoc(), array.getInput()),
+      array.getIndex());
+  return success();
+}
 // If this wire is only written to, delete the wire and all writers.
 LogicalResult WireOp::canonicalize(WireOp wire, PatternRewriter &rewriter) {
   // Block if op has SV attributes.

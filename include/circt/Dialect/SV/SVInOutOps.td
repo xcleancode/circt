@@ -108,6 +108,7 @@ def ReadInOutOp
                 " inout port) as the value itself.";
   let arguments = (ins InOutType:$input);
   let results = (outs HWValueType:$result);
+  let hasCanonicalizeMethod = true;
 
   let builders = [
     OpBuilder<(ins "Value":$input)>
