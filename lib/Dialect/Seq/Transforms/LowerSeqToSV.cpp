@@ -288,7 +288,7 @@ static bool areEquivalentValues(Value term, Value next) {
       if (auto c1 = t1.getIndex().getDefiningOp<hw::ConstantOp>())
         if (auto c2 = t2.getIndex().getDefiningOp<hw::ConstantOp>())
           return c1.getValue() == c2.getValue() &&
-                 equivalentValue(t1.getInput(), t2.getInput());
+                 areEquivalentValues(t1.getInput(), t2.getInput());
   // Otherwise, regard as different.
   // TODO: Handle struct if necessary.
   return false;

@@ -1452,6 +1452,12 @@ static Type getElementTypeOfWidth(Type type, int32_t width) {
         elemTy.cast<hw::ArrayType>().getElementType(), width));
   return {};
 }
+void IndexedPartSelectInOutOp::build(OpBuilder &builder, OperationState &result,
+                                     Value input, Value base, int32_t width,
+                                     bool decrement) {
+  Type resultType = getElementTypeOfWidth(input.getType(), width);
+  build(builder, result, resultType, input, base, width, decrement);
+}
 
 LogicalResult IndexedPartSelectInOutOp::inferReturnTypes(
     MLIRContext *context, Optional<Location> loc, ValueRange operands,
