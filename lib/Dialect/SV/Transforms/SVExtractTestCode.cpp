@@ -547,6 +547,19 @@ private:
 
 } // end anonymous namespace
 
+static void eraseOperations(SmallPtrSet<Operation *, 32> &opsToErase) {
+  // Erase operations in the set.  Parts of the forward dataflow may have been
+  // nested under other ops to erase, so as we visit ops to erase, we remove
+  // them and all their children from the set of ops to erase until nothing is
+  // left.
+  while (!opsToErase.empty()) {
+    Operation *op = *opsToErase.begin();
+    op->walk([&](Operation *erasedOp) { opsToErase.erase(erasedOp); });
+    op->dropAllUses();
+    op->erase();
+  }
+}
+
 void SVExtractTestCodeImplPass::runOnOperation() {
   auto top = getOperation();
   auto *topLevelModule = top.getBody();
@@ -635,20 +648,16 @@ void SVExtractTestCodeImplPass::runOnOperation() {
       anyThingExtracted |= doModule(rtlmod, isCover, "_cover", coverDir,
                                     coverBindFile, bindTable, opsToErase);
 
-      // Inline any modules that only have inputs for test code.
-      if (!disableModuleInlining && anyThingExtracted)
-        inlineInputOnly(rtlmod, instanceGraph, bindTable, opsToErase);
-
       // Erase any instances that were extracted, and their forward dataflow.
-      // Also erase old instances that were inlined and can now be cleaned up.
-      // Parts of the forward dataflow may have been nested under other ops to
-      // erase, so as we visit ops to erase, we remove them and all their
-      // children from the set of ops to erase until nothing is left.
-      while (!opsToErase.empty()) {
-        Operation *op = *opsToErase.begin();
-        op->walk([&](Operation *erasedOp) { opsToErase.erase(erasedOp); });
-        op->dropAllUses();
-        op->erase();
+      // Make sure to erase operations before inlining input only modules to
+      // avoid duplicating same operations.
+      eraseOperations(opsToErase);
+
+      // Inline any modules that only have inputs for test code.
+      if (!disableModuleInlining && anyThingExtracted) {
+        inlineInputOnly(rtlmod, instanceGraph, bindTable, opsToErase);
+        // Erase old instances that were inlined and can now be cleaned up.
+        eraseOperations(opsToErase);
       }
     }
   }

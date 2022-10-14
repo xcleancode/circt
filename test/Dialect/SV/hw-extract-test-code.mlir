@@ -259,3 +259,23 @@ module attributes {
     hw.instance "child" @ShouldBeInlined(clock: %clock: i1, in: %in: i1) -> ()
   }
 }
+
+// -----
+
+// Check that we don't duplicate assertions
+module {
+  hw.module private @InputOnly(%clock: i1, %cond: i1) {
+    sv.always posedge %clock {
+      sv.if %cond {
+        sv.assert %cond, immediate message "bar"
+      }
+    }
+    hw.output
+  }
+  // CHECK: sv.assert %cond, immediate message "bar"
+  // CHECK-NOT: sv.assert %cond, immediate message "bar"
+  hw.module @Top(%clock: i1, %cond: i1) {
+    hw.instance "input_only" @InputOnly(clock: %clock: i1, cond: %cond: i1) -> ()
+    hw.output
+  }
+}
