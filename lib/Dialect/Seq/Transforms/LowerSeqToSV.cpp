@@ -282,6 +282,10 @@ FirRegLower::RegLowerInfo FirRegLower::lower(hw::HWModuleOp module,
   RegLowerInfo svReg{nullptr, nullptr, nullptr, -1, 0};
   svReg.reg = builder.create<sv::RegOp>(loc, reg.getType(), reg.getNameAttr());
   svReg.width = hw::getBitWidth(reg.getResult().getType());
+  auto init = builder.createOrFold<hw::BitcastOp>(
+      loc, svReg.reg.getType().getElementType(),
+      builder.create<hw::ConstantOp>(loc, APInt::getZero(svReg.width)));
+  builder.create<sv::AssignOp>(loc, svReg.reg, init);
   if (auto attr = reg->getAttrOfType<IntegerAttr>("firrtl.random_init_start"))
     svReg.randStart = attr.getUInt();
 

@@ -3966,6 +3966,17 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
     }
   }
 
+  if (isa<RegOp>(op)) {
+    if (AssignOp next = dyn_cast_or_null<AssignOp>(op->getNextNode())) {
+      auto source = next.getSrc().getDefiningOp();
+      if (isa_and_nonnull<ConstantOp>(source)) {
+        os << " = ";
+        emitExpression(next.getSrc(), opsForLocation, ForceEmitMultiUse);
+        emitter.assignsInlined.insert(next);
+      }
+    }
+  }
+
   // Try inlining a blocking assignment to logic op declaration.
   if (isa<LogicOp>(op) && op->getParentOp()->hasTrait<ProceduralRegion>()) {
     // Get a single assignment which might be possible to inline.
