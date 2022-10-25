@@ -565,9 +565,90 @@ private:
 
 } // end anonymous namespace
 
+static std::pair<Value, StringAttr> extractCondition(Operation *op,
+                                                     hw::HWModuleOp module,
+                                                     sv::RegOp reg,
+                                                     unsigned &currentIndex) {
+  auto isAssert = [](Operation *op) -> bool {
+    // If the format of assert is "ifElseFatal", PrintOp is lowered into
+    // ErrorOp. So we have to check message contents whether they encode
+    // verifications. See FIRParserAsserts for more details.
+    if (auto error = dyn_cast<ErrorOp>(op)) {
+      if (auto message = error.getMessage())
+        return message->startswith("assert:") ||
+               message->startswith("Assertion failed") ||
+               message->startswith("assertNotX:") ||
+               message->contains("[verif-library-assert]");
+      return false;
+    }
+
+    return isa<AssertOp>(op) || isa<FinishOp>(op) || isa<FWriteOp>(op) ||
+           isa<AssertConcurrentOp>(op) || isa<FatalOp>(op);
+  };
+
+  if (!isAssert(op))
+    return {};
+
+  // reg r;
+  // if (a)
+  //   if(b)
+  //     fatal
+  // ==>
+  //  r <= !(a&b)
+  //
+  // if(a)
+  //    assert(foo) --> cond_reg = (a&foo)
+  // ==>
+  //  r <= a && not foo
+  OpBuilder builder(module.getBody());
+  auto index = builder.create<hw::ConstantOp>(
+      op->getLoc(),
+      APInt(std::max(1u,
+                     llvm::Log2_64_Ceil(
+                         reg.getElementType().cast<hw::ArrayType>().getSize())),
+            currentIndex));
+  currentIndex++;
+  auto index = builder.create<sv::ArrayIndexInOutOp>(op->getLoc(), reg, index);
+}
+
+unsigned getAssertionCounts(llvm::DenseMap<hw::HWModuleOp, unsigned> &count,
+                            hw::HWSymbolCache &cache, hw::HWModuleOp module) {
+  if (count.count(module))
+    return count.lookup(module);
+  unsigned sum = 0;
+  module.walk([&](Operation *op) {
+    if (op == module)
+      return;
+    if (auto instance = dyn_cast<hw::InstanceOp>(module)) {
+      auto hwmodule = instance.getReferencedModule(&cache);
+      if (auto h = dyn_cast<hw::HWModuleOp>(hwmodule))
+        sum += getAssertionCounts(count, cache, h);
+    }
+  });
+  return sum;
+}
+
+struct AssertionInfo {
+  SmallVector<SymbolRefAttr> path;
+  StringAttr message;
+  Location loc;
+};
+
+SmallVector<AssertionInfo> extractAssertion() {}
+
 void SVExtractTestCodeImplPass::runOnOperation() {
   auto top = getOperation();
   auto *topLevelModule = top.getBody();
+  hw::HWSymbolCache symCache;
+  symCache.addDefinitions(top);
+  symCache.freeze();
+
+  // Synthesize assertions.
+  // for (auto &op :
+  // llvm::make_early_inc_range(topLevelModule->getOperations())) { if (auto
+  // rtlmod = dyn_cast<hw::HWModuleOp>(op)) {
+  //
+
   auto assertDir =
       top->getAttrOfType<hw::OutputFileAttr>("firrtl.extract.assert");
   auto assumeDir =
@@ -582,10 +663,6 @@ void SVExtractTestCodeImplPass::runOnOperation() {
       top->getAttrOfType<hw::OutputFileAttr>("firrtl.extract.assume.bindfile");
   auto coverBindFile =
       top->getAttrOfType<hw::OutputFileAttr>("firrtl.extract.cover.bindfile");
-
-  hw::HWSymbolCache symCache;
-  symCache.addDefinitions(top);
-  symCache.freeze();
 
   // Symbols not in the cache will only be fore instances added by an extract
   // phase and are not instances that could possibly have extract flags on them.
