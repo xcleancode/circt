@@ -46,3 +46,13 @@ hw.module @d0(%clk : i1, %rst : i1) -> () {
   %myMemory_rdata = seq.read %myMemory[%c0_i0] rden %c1_i1 { latency = 0} : !seq.hlmem<1xi32>
   hw.output
 }
+
+hw.module @fifo1(%clk : i1, %rst : i1, %in : i32, %rdEn : i1, %wrEn : i1) -> () {
+  // CHECK: %out, %empty, %full, %almostEmpty, %almostFull = seq.fifo[3] (%in, %rdEn, %wrEn) %clk, %rst : (i32) -> i32
+  %out, %empty, %full, %almostEmpty, %almostFull = seq.fifo[3] (%in, %rdEn, %wrEn) %clk, %rst : (i32) -> i32
+}
+
+hw.module @fifo2(%clk : i1, %rst : i1, %in : i32, %rdEn : i1, %wrEn : i1) -> () {
+  // CHECK: %out0, %out1, %empty, %full, %almostEmpty, %almostFull = seq.fifo[3] (%in, %rdEn, %wrEn) %clk, %rst : (i32) -> (i16, i16)
+  %out0, %out1, %empty, %full, %almostEmpty, %almostFull = seq.fifo[3] (%in, %rdEn, %wrEn) %clk, %rst : (i32) -> (i16, i16)
+}
