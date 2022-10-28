@@ -261,8 +261,8 @@ void FirRegLower::lower(hw::HWModuleOp module) {
 
 void FirRegLower::createTree(OpBuilder &builder, sv::RegOp reg, Value term,
                              Value next) {
-  if (term == next)
-    return;
+  // if (term == next)
+  //   return;
   auto mux = next.getDefiningOp<comb::MuxOp>();
   if (mux && mux.getTwoState()) {
     addToIfBlock(
