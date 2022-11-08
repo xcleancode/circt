@@ -86,6 +86,15 @@ static void spillWiresForInstanceInputs(InstanceOp op) {
     else
       nameTmp += std::to_string(nextOpNo - 1);
 
+    // If the input is a constant, specialize the constant op so that the
+    // constant op is inlined for normal uses.
+    if (auto constant = src.getDefiningOp<hw::ConstantOp>())
+      if (!src.hasOneUse()) {
+        src = constant.clone();
+        OpBuilder(constant).insert(src.getDefiningOp());
+        op.setOperand(nextOpNo - 1, src);
+      }
+
     auto newWire = builder.create<WireOp>(src.getType(), nameTmp);
     auto newWireRead = builder.create<ReadInOutOp>(newWire);
     auto connect = builder.create<AssignOp>(newWire, src);

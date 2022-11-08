@@ -604,6 +604,9 @@ hw.module @bind_rename_port(%.io_req_ready.output: i1, %reset: i1, %clock: i1) {
 }
 
 hw.module @SiFive_MulDiv(%clock: i1, %reset: i1) -> (io_req_ready: i1) {
+  // CHECK-LABEL:  SiFive_MulDiv
+  // CHECK: wire _InvisibleBind_assert__io_req_ready_output = 1'h0;
+  // CHECK: assign io_req_ready = 1'h0;
   %false = hw.constant false
   hw.instance "InvisibleBind_assert" sym @__ETC_SiFive_MulDiv_assert @bind_rename_port(".io_req_ready.output": %false: i1, reset: %reset: i1, clock: %clock: i1) -> () {doNotPrint = true}
   hw.probe @unused, %false, %reset, %clock: i1,i1,i1
