@@ -210,8 +210,16 @@ void HWMemSimImpl::generateMemory(HWModuleOp op, FirMemory mem) {
   auto dataType = b.getIntegerType(mem.dataWidth);
 
   // Create registers for the memory.
-  Value reg = b.create<sv::RegOp>(UnpackedArrayType::get(dataType, mem.depth),
-                                  b.getStringAttr("Memory"));
+  sv::RegOp reg = b.create<sv::RegOp>(
+      UnpackedArrayType::get(dataType, mem.depth), b.getStringAttr("Memory"));
+
+  circt::sv::setSVAttributes(
+      reg, sv::SVAttributesAttr::get(
+               b.getContext(),
+               b.getArrayAttr(sv::SVAttributeAttr::get(
+                   b.getContext(), b.getStringAttr("ram_style"),
+                   b.getStringAttr("\"distributed\""))),
+               b.getBoolAttr(false)));
 
   SmallVector<Value, 4> outputs;
 
