@@ -1546,7 +1546,8 @@ static LogicalResult canonicalizeSingleSetConnect(StrictConnectOp op,
     // This will be replaced with the constant source.  First, make sure the
     // constant dominates all users.
     else if (srcValueOp != &declBlock->front()) {
-      srcValueOp->moveBefore(&declBlock->front());
+      rewriter.setInsertionPoint(&declBlock->front());
+      replacement = rewriter.clone(*srcValueOp)->getResult(0);
     }
   }
 
@@ -1996,8 +1997,10 @@ struct FoldResetMux : public mlir::RewritePattern {
     // Ok, we know we are doing the transformation.
 
     // Make sure the constant dominates all users.
-    if (constOp != &con->getBlock()->front())
-      constOp->moveBefore(&con->getBlock()->front());
+    if (constOp != &con->getBlock()->front()) {
+      rewriter.setInsertionPoint(&con->getBlock()->front());
+      constOp = cast<ConstantOp>(rewriter.clone(*constOp));
+    }
 
     // Replace the register with the constant.
     replaceOpAndCopyName(rewriter, reg, constOp.getResult());
@@ -2343,8 +2346,11 @@ static LogicalResult foldHiddenReset(RegOp reg, PatternRewriter &rewriter) {
   // Ok, we know we are doing the transformation.
 
   // Make sure the constant dominates all users.
-  if (constOp != &con->getBlock()->front())
-    constOp->moveBefore(&con->getBlock()->front());
+  if (constOp != &con->getBlock()->front()) {
+    OpBuilder::InsertionGuard g(rewriter);
+    rewriter.setInsertionPoint(&con->getBlock()->front());
+    constOp = cast<ConstantOp>(rewriter.clone(*constOp));
+  }
 
   if (!constReg) {
     SmallVector<NamedAttribute, 2> attrs(reg->getDialectAttrs());
