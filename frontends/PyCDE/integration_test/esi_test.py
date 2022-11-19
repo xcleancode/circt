@@ -10,7 +10,6 @@ from pycde import (Clock, Input, InputChannel, OutputChannel, module, generator,
                    types)
 from pycde import esi
 from pycde.constructs import Wire
-from pycde.dialects import comb
 
 import sys
 
@@ -19,8 +18,8 @@ import sys
 class HostComms:
   to_host = esi.ToServer(types.any)
   from_host = esi.FromServer(types.any)
-  req_resp = esi.ToFromServer(to_server_type=types.i16,
-                              to_client_type=types.i32)
+  req_resp = esi.ToFromServer(to_server_type=types.ui17,
+                              to_client_type=types.ui16)
 
 
 @module
@@ -49,15 +48,17 @@ class LoopbackInOutAdd7:
 
   @generator
   def construct(ports):
-    loopback = Wire(types.channel(types.i16))
+    loopback = Wire(types.channel(types.ui17))
     from_host = HostComms.req_resp(loopback, "loopback_inout")
     ready = Wire(types.i1)
+
     wide_data, valid = from_host.unwrap(ready)
-    data = wide_data[0:16]
-    # TODO: clean this up with PyCDE overloads (they're currently a little bit
-    # broken for this use-case).
-    data = comb.AddOp(data, types.i16(7))
-    data_chan, data_ready = loopback.type.wrap(data, valid)
+
+    wide_data_plus_7 = wide_data + types.ui16(7).as_uint()
+    # wide_data_plus_7 = wide_data + types.ui16(7)
+    # wide_data_plus_7 = wide_data + 7
+
+    data_chan, data_ready = loopback.type.wrap(wide_data_plus_7, valid)
     ready.assign(data_ready)
     loopback.assign(data_chan)
 
@@ -90,9 +91,13 @@ class top:
 
 if __name__ == "__main__":
   s = pycde.System([top], name="ESILoopback", output_directory=sys.argv[1])
-  s.generate()
-  s.emit_outputs()
-  s.build_api("python")
+  try:
+    s.generate()
+    s.emit_outputs()
+    s.build_api("python")
+  except Exception as e:
+    print(s.mod)
+    raise e
 
 
 def run_cosim(tmpdir, schema_path, rpchostport):
