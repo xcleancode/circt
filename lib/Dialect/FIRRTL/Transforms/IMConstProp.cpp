@@ -296,6 +296,8 @@ struct IMConstPropPass : public IMConstPropBase<IMConstPropPass> {
   void markSpecialConstantOp(SpecialConstantOp specialConstant);
   void markInstanceOp(InstanceOp instance);
 
+  void markDest(Value dest, LatticeValue lattice);
+
   void visitConnectLike(FConnectLike connect);
   void visitRegResetOp(RegResetOp regReset);
   void visitRefSend(RefSendOp send);
@@ -420,8 +422,6 @@ void IMConstPropPass::markBlockExecutable(Block *block) {
     // Handle each of the special operations in the firrtl dialect.
     if (isWireOrReg(&op))
       markWireOrRegOp(&op);
-    else if (isAggregate(&op))
-      markOverdefined(op.getResult(0));
     else if (auto constant = dyn_cast<ConstantOp>(op))
       markConstantOp(constant);
     else if (auto specialConstant = dyn_cast<SpecialConstantOp>(op))
@@ -529,6 +529,57 @@ void IMConstPropPass::markInstanceOp(InstanceOp instance) {
   }
 }
 
+void IMConstPropPass::markDest(Value dest, LatticeValue srcValue) {
+  // Driving result ports propagates the value to each instance using the
+  // module.
+  if (auto blockArg = dest.dyn_cast<BlockArgument>()) {
+    for (auto userOfResultPort : resultPortToInstanceResultMapping[blockArg])
+      mergeLatticeValue(userOfResultPort, srcValue);
+    // Output ports are wire-like and may have users.
+    return mergeLatticeValue(dest, srcValue);
+  }
+
+  auto destResult = dest.cast<mlir::OpResult>();
+
+  // For wires and registers, we drive the value of the wire itself, which
+  // automatically propagates to users.
+  if (isWireOrReg(destResult.getOwner()))
+    return mergeLatticeValue(dest, srcValue);
+
+  // Driving an instance argument port drives the corresponding argument of the
+  // referenced module.
+  if (auto instance = dest.getDefiningOp<InstanceOp>()) {
+    // Update the dest, when its an instance op.
+    mergeLatticeValue(dest, srcValue);
+    auto module =
+        dyn_cast<FModuleOp>(*instanceGraph->getReferencedModule(instance));
+    if (!module)
+      return;
+
+    BlockArgument modulePortVal =
+        module.getArgument(destResult.getResultNumber());
+    return mergeLatticeValue(modulePortVal, srcValue);
+  }
+
+  // Driving a memory result is ignored because these are always treated as
+  // overdefined.
+  if (auto subfield = dest.getDefiningOp<SubfieldOp>()) {
+    if (subfield.getOperand().getDefiningOp<MemOp>())
+      return;
+  }
+
+  if (isAggregate(destResult.getOwner())) {
+    markOverdefined(destResult);
+    // Recursively mark entire aggregate as overdefined.
+    return markDest(destResult.getDefiningOp()->getOperand(0),
+                    LatticeValue::getOverdefined());
+  }
+
+  // connect.emitError("connectlike operation unhandled by IMConstProp")
+  //         .attachNote(connect.getDest().getLoc())
+  //     << "connect destination is here";
+}
+
 void IMConstPropPass::visitConnectLike(FConnectLike connect) {
   // Mark foreign types as overdefined.
   auto destTypeFIRRTL = connect.getDest().getType().dyn_cast<FIRRTLType>();
@@ -543,51 +594,7 @@ void IMConstPropPass::visitConnectLike(FConnectLike connect) {
   if (srcValue.isUnknown())
     return;
 
-  // Driving result ports propagates the value to each instance using the
-  // module.
-  if (auto blockArg = connect.getDest().dyn_cast<BlockArgument>()) {
-    for (auto userOfResultPort : resultPortToInstanceResultMapping[blockArg])
-      mergeLatticeValue(userOfResultPort, srcValue);
-    // Output ports are wire-like and may have users.
-    return mergeLatticeValue(connect.getDest(), srcValue);
-  }
-
-  auto dest = connect.getDest().cast<mlir::OpResult>();
-
-  // For wires and registers, we drive the value of the wire itself, which
-  // automatically propagates to users.
-  if (isWireOrReg(dest.getOwner()))
-    return mergeLatticeValue(connect.getDest(), srcValue);
-
-  // Driving an instance argument port drives the corresponding argument of the
-  // referenced module.
-  if (auto instance = dest.getDefiningOp<InstanceOp>()) {
-    // Update the dest, when its an instance op.
-    mergeLatticeValue(connect.getDest(), srcValue);
-    auto module =
-        dyn_cast<FModuleOp>(*instanceGraph->getReferencedModule(instance));
-    if (!module)
-      return;
-
-    BlockArgument modulePortVal = module.getArgument(dest.getResultNumber());
-    return mergeLatticeValue(modulePortVal, srcValue);
-  }
-
-  // Driving a memory result is ignored because these are always treated as
-  // overdefined.
-  if (auto subfield = dest.getDefiningOp<SubfieldOp>()) {
-    if (subfield.getOperand().getDefiningOp<MemOp>())
-      return;
-  }
-
-  // Skip if the dest is an aggregate value. Aggregate values are firstly marked
-  // overdefined.
-  if (isAggregate(dest.getOwner()))
-    return;
-
-  connect.emitError("connectlike operation unhandled by IMConstProp")
-          .attachNote(connect.getDest().getLoc())
-      << "connect destination is here";
+  return markDest(connect.getDest(), srcValue);
 }
 
 void IMConstPropPass::visitRegResetOp(RegResetOp regReset) {
