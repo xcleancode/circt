@@ -709,6 +709,17 @@ processBuffer(MLIRContext &context, TimingScope &ts, llvm::SourceMgr &sourceMgr,
   if (!disablePrefixModules)
     pm.nest<firrtl::CircuitOp>().addPass(firrtl::createPrefixModulesPass());
 
+  if (!disableOptimization &&
+      preserveAggregate != firrtl::PreserveAggregate::None &&
+      !disableMergeConnections)
+    pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
+        firrtl::createMergeConnectionsPass(mergeConnectionsAgggresively));
+
+  // If we parsed a FIRRTL file and have optimizations enabled, clean it up.
+  if (!disableOptimization)
+    pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
+        createSimpleCanonicalizerPass());
+
   if (!disableIMCP && !disableOptimization)
     pm.nest<firrtl::CircuitOp>().addPass(firrtl::createIMConstPropPass());
 
