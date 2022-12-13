@@ -146,6 +146,8 @@ public:
   /// fields of are.
   unsigned getGroundFields() const;
 
+  bool isConst();
+
 protected:
   using FIRRTLType::FIRRTLType;
 };
@@ -238,7 +240,8 @@ public:
   using FIRRTLBaseType::FIRRTLBaseType;
 
   /// Return a SIntType or UInt type with the specified signedness and width.
-  static IntType get(MLIRContext *context, bool isSigned, int32_t width = -1);
+  static IntType get(MLIRContext *context, bool isSigned, int32_t width = -1,
+                     bool isConst = false);
 
   bool isSigned() { return isa<SIntType>(); }
   bool isUnsigned() { return isa<UIntType>(); }
@@ -252,6 +255,9 @@ public:
   /// Return the width of this type, or -1 if it has none specified.
   int32_t getWidthOrSentinel() { return getWidth().value_or(-1); }
 
+  /// Return whether this type is const
+  bool isConst();
+
   static bool classof(Type type) {
     return type.isa<SIntType>() || type.isa<UIntType>();
   }
@@ -263,10 +269,14 @@ public:
   using WidthQualifiedType::WidthQualifiedType;
 
   /// Get an with a known width, or -1 for unknown.
-  static SIntType get(MLIRContext *context, int32_t width = -1);
+  static SIntType get(MLIRContext *context, int32_t width = -1,
+                      bool isConst = false);
 
   /// Return the bitwidth of this type or None if unknown.
   std::optional<int32_t> getWidth();
+
+  /// Return whether this type is const
+  bool isConst();
 };
 
 /// An unsigned integer type, whose width may not be known.
@@ -275,10 +285,14 @@ public:
   using WidthQualifiedType::WidthQualifiedType;
 
   /// Get an with a known width, or -1 for unknown.
-  static UIntType get(MLIRContext *context, int32_t width = -1);
+  static UIntType get(MLIRContext *context, int32_t width = -1,
+                      bool isConst = false);
 
   /// Return the bitwidth of this type or None if unknown.
   std::optional<int32_t> getWidth();
+
+  /// Return whether this type is const
+  bool isConst();
 };
 
 //===----------------------------------------------------------------------===//
@@ -367,6 +381,8 @@ public:
   /// Returns the new id and whether the id is in the given child.
   std::pair<unsigned, bool> rootChildFieldID(unsigned fieldID, unsigned index);
 
+  bool isConst();
+
   using iterator = ArrayRef<BundleElement>::iterator;
   iterator begin() const { return getElements().begin(); }
   iterator end() const { return getElements().end(); }
@@ -417,6 +433,8 @@ public:
   /// of the type.  Essentially maps a fieldID to a fieldID after a subfield op.
   /// Returns the new id and whether the id is in the given child.
   std::pair<size_t, bool> rootChildFieldID(size_t fieldID, size_t index);
+
+  bool isConst() { return getElementType().isConst(); }
 };
 
 //===----------------------------------------------------------------------===//
@@ -451,10 +469,11 @@ std::optional<int64_t> getBitWidth(FIRRTLBaseType type,
 
 // Parse a FIRRTL type without a leading `!firrtl.` dialect tag.
 ParseResult parseNestedType(FIRRTLType &result, AsmParser &parser);
-ParseResult parseNestedBaseType(FIRRTLBaseType &result, AsmParser &parser);
+ParseResult parseNestedBaseType(FIRRTLBaseType &result, AsmParser &parser,
+                                bool isConst = false);
 
 // Print a FIRRTL type without a leading `!firrtl.` dialect tag.
-void printNestedType(Type type, AsmPrinter &os);
+void printNestedType(Type type, AsmPrinter &os, bool includeConst = false);
 
 } // namespace firrtl
 } // namespace circt

@@ -231,7 +231,10 @@ struct FIRParser {
   ParseResult parseId(StringRef &result, const Twine &message);
   ParseResult parseId(StringAttr &result, const Twine &message);
   ParseResult parseFieldId(StringRef &result, const Twine &message);
-  ParseResult parseType(FIRRTLType &result, const Twine &message);
+
+  enum class ConstState { Unknown, Const, Nonconst };
+  ParseResult parseType(FIRRTLType &result, const Twine &message,
+                        ConstState constState = ConstState::Unknown);
 
   ParseResult parseOptionalRUW(RUWAttr &result);
 
@@ -641,10 +644,12 @@ ParseResult FIRParser::parseFieldId(StringRef &result, const Twine &message) {
 ///      ::= 'Analog' optional-width
 ///      ::= {' field* '}'
 ///      ::= type '[' intLit ']'
+///      ::= 'const' type
 ///
 /// field: 'flip'? fieldId ':' type
 ///
-ParseResult FIRParser::parseType(FIRRTLType &result, const Twine &message) {
+ParseResult FIRParser::parseType(FIRRTLType &result, const Twine &message,
+                                 ConstState constState) {
   switch (getToken().getKind()) {
   default:
     return emitError(message), failure();
@@ -668,6 +673,7 @@ ParseResult FIRParser::parseType(FIRRTLType &result, const Twine &message) {
   case FIRToken::kw_SInt:
   case FIRToken::kw_Analog: {
     auto kind = getToken().getKind();
+    auto loc = getToken().getLoc();
     consumeToken();
 
     // Parse a width specifier if present.
@@ -675,12 +681,16 @@ ParseResult FIRParser::parseType(FIRRTLType &result, const Twine &message) {
     if (parseOptionalWidth(width))
       return failure();
 
+    bool isConst = constState == ConstState::Const;
+
     if (kind == FIRToken::kw_SInt)
-      result = SIntType::get(getContext(), width);
+      result = SIntType::get(getContext(), width, isConst);
     else if (kind == FIRToken::kw_UInt)
-      result = UIntType::get(getContext(), width);
+      result = UIntType::get(getContext(), width, isConst);
     else {
       assert(kind == FIRToken::kw_Analog);
+      if (isConst)
+        return emitError(loc, "'const' is not supported on 'Analog' types");
       result = AnalogType::get(getContext(), width);
     }
     break;
@@ -697,7 +707,9 @@ ParseResult FIRParser::parseType(FIRRTLType &result, const Twine &message) {
           FIRRTLType type;
           if (parseFieldId(fieldName, "expected bundle field name") ||
               parseToken(FIRToken::colon, "expected ':' in bundle") ||
-              parseType(type, "expected bundle field type"))
+              parseType(type, "expected bundle field type",
+                        constState == ConstState::Const ? constState
+                                                        : ConstState::Nonconst))
             return failure();
 
           auto baseType = type.dyn_cast<FIRRTLBaseType>();
@@ -712,6 +724,14 @@ ParseResult FIRParser::parseType(FIRRTLType &result, const Twine &message) {
     result = BundleType::get(elements, getContext());
     break;
   }
+
+  case FIRToken::kw_const:
+    if (constState != ConstState::Unknown)
+      return emitError(
+          getToken().getLoc(),
+          "'const' can only be declared once on the outermost type");
+    consumeToken();
+    return parseType(result, message, ConstState::Const);
   }
 
   // Handle postfix vector sizes.
@@ -1133,7 +1153,7 @@ private:
 
   // Exp Parsing
   ParseResult parseExpImpl(Value &result, const Twine &message,
-                           bool isLeadingStmt);
+                           bool isLeadingStmt, bool isConst = false);
   ParseResult parseExp(Value &result, const Twine &message) {
     return parseExpImpl(result, message, /*isLeadingStmt:*/ false);
   }
@@ -1146,7 +1166,7 @@ private:
   ParseResult parsePostFixIntSubscript(Value &result);
   ParseResult parsePostFixDynamicSubscript(Value &result);
   ParseResult parsePrimExp(Value &result);
-  ParseResult parseIntegerLiteralExp(Value &result);
+  ParseResult parseIntegerLiteralExp(Value &result, bool isConst);
 
   std::optional<ParseResult> parseExpWithLeadingKeyword(FIRToken keyword);
 
@@ -1323,7 +1343,7 @@ void FIRStmtParser::emitPartialConnect(ImplicitLocOpBuilder &builder, Value dst,
 /// we end up parsing the whole statement.  In that case we return success, but
 /// set the 'result' value to null.
 ParseResult FIRStmtParser::parseExpImpl(Value &result, const Twine &message,
-                                        bool isLeadingStmt) {
+                                        bool isLeadingStmt, bool isConst) {
   switch (getToken().getKind()) {
 
     // Handle all the primitive ops: primop exp* intLit*  ')'.  There is a
@@ -1340,7 +1360,16 @@ ParseResult FIRStmtParser::parseExpImpl(Value &result, const Twine &message,
 
   case FIRToken::kw_UInt:
   case FIRToken::kw_SInt:
-    if (parseIntegerLiteralExp(result))
+    if (parseIntegerLiteralExp(result, isConst))
+      return failure();
+    break;
+
+  case FIRToken::kw_const:
+    if (isConst)
+      return emitError(
+          "'const' can only be declared once on the outermost type");
+    consumeToken();
+    if (parseExpImpl(result, message, isLeadingStmt, true))
       return failure();
     break;
 
@@ -1676,7 +1705,7 @@ ParseResult FIRStmtParser::parsePrimExp(Value &result) {
 
 /// integer-literal-exp ::= 'UInt' optional-width '(' intLit ')'
 ///                     ::= 'SInt' optional-width '(' intLit ')'
-ParseResult FIRStmtParser::parseIntegerLiteralExp(Value &result) {
+ParseResult FIRStmtParser::parseIntegerLiteralExp(Value &result, bool isConst) {
   bool isSigned = getToken().is(FIRToken::kw_SInt);
   auto loc = getToken().getLoc();
   consumeToken();
@@ -1691,7 +1720,7 @@ ParseResult FIRStmtParser::parseIntegerLiteralExp(Value &result) {
     return failure();
 
   // Construct an integer attribute of the right width.
-  auto type = IntType::get(builder.getContext(), isSigned, width);
+  auto type = IntType::get(builder.getContext(), isSigned, width, isConst);
 
   IntegerType::SignednessSemantics signedness =
       isSigned ? IntegerType::Signed : IntegerType::Unsigned;
