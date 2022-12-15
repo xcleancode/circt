@@ -41,11 +41,8 @@ using mlir::TypeStorageAllocator;
 /// instead, which will call this function in turn, as appropriate.
 static LogicalResult customTypePrinter(Type type, AsmPrinter &os,
                                        bool includeConst) {
-  if (includeConst) {
-    if (auto baseType = type.dyn_cast<FIRRTLBaseType>();
-        baseType && baseType.isConst())
-      os << "const.";
-  }
+  if (includeConst && isConst(type))
+    os << "const.";
 
   auto printWidthQualifier = [&](std::optional<int32_t> width) {
     if (width)

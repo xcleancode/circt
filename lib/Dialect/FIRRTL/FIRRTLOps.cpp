@@ -2741,7 +2741,7 @@ static bool isSameIntTypeKind(Type lhs, Type rhs, int32_t &lhsWidth,
   return true;
 }
 
-static bool isConst(FIRRTLType type) {
+bool firrtl::isConst(Type type) {
   if (auto base = type.dyn_cast<FIRRTLBaseType>())
     return base.isConst();
   return false;

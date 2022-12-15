@@ -125,8 +125,12 @@ protected:
   /// for retrieving the responsible connect operation.
   ScopedDriverMap &driverMap;
 
+  bool insideNonConstWhen;
+
 public:
-  LastConnectResolver(ScopedDriverMap &driverMap) : driverMap(driverMap) {}
+  LastConnectResolver(ScopedDriverMap &driverMap,
+                      bool insideNonConstWhen = false)
+      : driverMap(driverMap), insideNonConstWhen(insideNonConstWhen) {}
 
   using FIRRTLVisitor<ConcreteT>::visitExpr;
   using FIRRTLVisitor<ConcreteT>::visitDecl;
@@ -136,6 +140,14 @@ public:
   /// delete a previous connection to a destination if there was one. Returns
   /// true if an old connect was erased.
   bool setLastConnect(FieldRef dest, Operation *connection) {
+    if (insideNonConstWhen) {
+      if (isConst(dest.getValue().getType())) {
+        connection->emitError(
+            "const sink \"" + getFieldName(dest).first +
+            "\" initialization is dependent on a non-const condition");
+      }
+    }
+
     // Try to insert, if it doesn't insert, replace the previous value.
     auto itAndInserted = driverMap.getLastScope().insert({dest, connection});
     if (!std::get<1>(itAndInserted)) {
@@ -341,8 +353,8 @@ public:
 
       auto elseIt = elseScope.find(dest);
       if (elseIt != elseScope.end()) {
-        // `dest` is set in `then` and `else`. We need to combine them into and
-        // delete any previous connect.
+        // `dest` is set in `then` and `else`. We need to combine them into
+        // and delete any previous connect.
 
         // Create a new connect with `mux(p, then, else)`.
         auto &elseConnect = std::get<1>(*elseIt);
@@ -369,8 +381,8 @@ public:
         continue;
       }
 
-      // `dest` is set in `then` and the outer scope.  Create a new connect with
-      // `mux(p, then, outer)`.
+      // `dest` is set in `then` and the outer scope.  Create a new connect
+      // with `mux(p, then, outer)`.
       OpBuilder connectBuilder(thenConnect);
       auto newConnect = flattenConditionalConnections(
           connectBuilder, loc, getDestinationValue(thenConnect), thenCondition,
@@ -402,8 +414,8 @@ public:
         continue;
       }
 
-      // `dest` is set in the `else` and outer scope. Create a new connect with
-      // `mux(p, outer, else)`.
+      // `dest` is set in the `else` and outer scope. Create a new connect
+      // with `mux(p, outer, else)`.
       OpBuilder connectBuilder(elseConnect);
       auto newConnect = flattenConditionalConnections(
           connectBuilder, loc, getDestinationValue(outerConnect), thenCondition,
@@ -429,7 +441,9 @@ class WhenOpVisitor : public LastConnectResolver<WhenOpVisitor> {
 
 public:
   WhenOpVisitor(ScopedDriverMap &driverMap, Value condition)
-      : LastConnectResolver<WhenOpVisitor>(driverMap), condition(condition) {}
+      : LastConnectResolver<WhenOpVisitor>(
+            driverMap, condition ? !isConst(condition.getType()) : false),
+        condition(condition) {}
 
   using LastConnectResolver<WhenOpVisitor>::visitExpr;
   using LastConnectResolver<WhenOpVisitor>::visitDecl;

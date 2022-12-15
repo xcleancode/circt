@@ -51,6 +51,8 @@ size_t getNumPorts(Operation *op);
 bool isConstant(Operation *op);
 bool isConstant(Value value);
 
+bool isConst(Type type);
+
 /// Returns true if the value results from an expression with duplex flow.
 /// Duplex values have special treatment in bundle connect operations, and
 /// their flip orientation is not used to determine the direction of each
