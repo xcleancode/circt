@@ -766,12 +766,17 @@ processBuffer(MLIRContext &context, TimingScope &ts, llvm::SourceMgr &sourceMgr,
     pm.nest<firrtl::CircuitOp>().addPass(
         firrtl::createEmitOMIRPass(omirOutFile));
 
-  if (!disableOptimization &&
-      preserveAggregate != firrtl::PreserveAggregate::None &&
-      !disableMergeConnections)
-    pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
-        firrtl::createMergeConnectionsPass(
-            !disableAggressiveMergeConnections.getValue()));
+  if (preserveAggregate != firrtl::PreserveAggregate::None) {
+    if (!disableOptimization &&
+        preserveAggregate != firrtl::PreserveAggregate::None &&
+        !disableMergeConnections)
+      pm.nest<firrtl::CircuitOp>().nest<firrtl::FModuleOp>().addPass(
+          firrtl::createMergeConnectionsPass(
+              !disableAggressiveMergeConnections.getValue()));
+
+    pm.nest<firrtl::CircuitOp>().addPass(
+        firrtl::createIMCombCycleResolverPass());
+  }
 
   // Lower if we are going to verilog or if lowering was specifically requested.
   if (outputFormat != OutputIRFir) {

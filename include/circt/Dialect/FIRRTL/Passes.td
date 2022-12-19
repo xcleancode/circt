@@ -115,6 +115,21 @@ def IMDeadCodeElim : Pass<"firrtl-imdeadcodeelim", "firrtl::CircuitOp"> {
   ];
 }
 
+def IMCombCycleResolver : Pass<"firrtl-imcombcycleresolver", "firrtl::CircuitOp"> {
+  let summary = "Intermodule dead code elimination";
+  let description = [{
+    This pass performs inter-module liveness analysis and deletes dead code
+    aggressively. A value is considered as alive if it is connected to a port
+    of public modules or a value with a symbol. We first populate alive values
+    into a set, and then propagate the liveness by looking at their dataflow.
+  }];
+  let constructor = "circt::firrtl::createIMCombCycleResolverPass()";
+  let statistics = [
+    Statistic<"numMustLowered", "num-must-lowered", "Number of operations erased">,
+    Statistic<"numCanPreserve", "num-can-preserve", "Number of modules erased">,
+  ];
+}
+
 def Inliner : Pass<"firrtl-inliner", "firrtl::CircuitOp"> {
   let summary = "Performs inlining, flattening, and dead module elimination";
   let description = [{

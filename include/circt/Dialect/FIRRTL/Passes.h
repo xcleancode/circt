@@ -139,6 +139,8 @@ std::unique_ptr<mlir::Pass> createExtractInstancesPass();
 
 std::unique_ptr<mlir::Pass> createIMDeadCodeElimPass();
 
+std::unique_ptr<mlir::Pass> createIMCombCycleResolverPass();
+
 std::unique_ptr<mlir::Pass> createRandomizeRegisterInitPass();
 
 std::unique_ptr<mlir::Pass> createLowerXMRPass();

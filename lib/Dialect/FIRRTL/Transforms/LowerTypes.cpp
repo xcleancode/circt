@@ -563,7 +563,7 @@ bool TypeLoweringVisitor::lowerProducer(
     return false;
   SmallVector<FlatBundleFieldEntry, 8> fieldTypes;
 
-  if (!peelType(srcType, fieldTypes, aggregatePreservationMode))
+  if (!peelType(srcType, fieldTypes, PreserveAggregate::None))
     return false;
 
   // If an aggregate value has a symbol, emit errors.
