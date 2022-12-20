@@ -563,7 +563,7 @@ bool TypeLoweringVisitor::lowerProducer(
     return false;
   SmallVector<FlatBundleFieldEntry, 8> fieldTypes;
 
-  if (!peelType(srcType, fieldTypes, PreserveAggregate::None))
+  if (!peelType(srcType, fieldTypes, aggregatePreservationMode))
     return false;
 
   // If an aggregate value has a symbol, emit errors.
@@ -719,7 +719,11 @@ bool TypeLoweringVisitor::lowerArg(FModuleLike module, size_t argIndex,
   // Flatten any bundle types.
   SmallVector<FlatBundleFieldEntry> fieldTypes;
   auto srcType = newArgs[argIndex].type.cast<FIRRTLType>();
-  if (!peelType(srcType, fieldTypes, getPreservatinoModeForModule(module)))
+  auto aggre = getPreservatinoModeForModule(module);
+  if (newArgs[argIndex].annotations.hasAnnotation("circt.lowerAggregate")) {
+    aggre = PreserveAggregate::None;
+  }
+  if (!peelType(srcType, fieldTypes, aggre))
     return false;
 
   for (const auto &field : llvm::enumerate(fieldTypes)) {
@@ -1217,6 +1221,14 @@ bool TypeLoweringVisitor::visitDecl(InstanceOp op) {
   for (size_t i = 0, e = op.getNumResults(); i != e; ++i) {
     auto srcType = op.getType(i).cast<FIRRTLType>();
 
+    if (oldPortAnno[i].dyn_cast_or_null<ArrayAttr>())
+      for (auto opAttr : oldPortAnno[i].dyn_cast_or_null<ArrayAttr>()) {
+        if (opAttr)
+          if (auto dict = opAttr.dyn_cast<DictionaryAttr>()) {
+            if (dict.contains("circt.lowerAggregate"))
+              mode = PreserveAggregate::None;
+          }
+      }
     // Flatten any nested bundle types the usual way.
     SmallVector<FlatBundleFieldEntry, 8> fieldTypes;
     if (!peelType(srcType, fieldTypes, mode)) {

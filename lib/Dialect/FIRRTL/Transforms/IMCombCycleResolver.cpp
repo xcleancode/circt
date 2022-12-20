@@ -76,7 +76,7 @@ struct IMCombCycleResolverPass
     : public IMCombCycleResolverBase<IMCombCycleResolverPass> {
   void runOnOperation() override;
 
-  void rewriteModuleSignature(FModuleOp module);
+  void rewriteModuleSignature(FModuleOp module, InstanceGraph *graph);
   void rewriteModuleBody(FModuleOp module);
 
   void markAlive(Value value) {
@@ -208,7 +208,7 @@ void IMCombCycleResolverPass::runOnOperation() {
 
   // Rewrite module signatures.
   for (auto module : circuit.getBodyBlock()->getOps<FModuleOp>())
-    rewriteModuleSignature(module);
+    rewriteModuleSignature(module, instanceGraph);
 
   // Rewrite module bodies parallelly.
   mlir::parallelForEach(circuit.getContext(),
@@ -250,9 +250,8 @@ void IMCombCycleResolverPass::visitValue(Value value) {
   }
 
   // If a port of a memory is alive, all other ports are.
-  if (auto mem = value.getDefiningOp<MemOp>()) {
+  if (auto mem = value.getDefiningOp<MemOp>())
     return;
-  }
 
   // If op is defined by an operation, mark its operands as alive.
   if (auto op = value.getDefiningOp())
@@ -284,76 +283,69 @@ void IMCombCycleResolverPass::rewriteModuleBody(FModuleOp module) {
     return;
 }
 
-namespace {
-/// This represents a flattened bundle field element.
-struct FlatBundleFieldEntry {
-  /// This is the underlying ground type of the field.
-  FIRRTLBaseType type;
-  /// The index in the parent type
-  size_t index;
-  /// The fieldID
-  unsigned fieldID;
-  /// This is a suffix to add to the field name to make it unique.
-  SmallString<16> suffix;
-  /// This indicates whether the field was flipped to be an output.
-  bool isOutput;
-
-  FlatBundleFieldEntry(const FIRRTLBaseType &type, size_t index,
-                       unsigned fieldID, StringRef suffix, bool isOutput)
-      : type(type), index(index), fieldID(fieldID), suffix(suffix),
-        isOutput(isOutput) {}
-
-  void dump() const {
-    llvm::errs() << "FBFE{" << type << " index<" << index << "> fieldID<"
-                 << fieldID << "> suffix<" << suffix << "> isOutput<"
-                 << isOutput << ">}\n";
-  }
-};
-} // namespace
-
-static bool peelType(Type type, SmallVectorImpl<FlatBundleFieldEntry> &fields) {
-  if (auto refType = type.dyn_cast<RefType>())
-    type = refType.getType();
-  return TypeSwitch<Type, bool>(type)
-      .Case<BundleType>([&](auto bundle) {
-        SmallString<16> tmpSuffix;
-        // Otherwise, we have a bundle type.  Break it down.
-        for (size_t i = 0, e = bundle.getNumElements(); i < e; ++i) {
-          auto elt = bundle.getElement(i);
-          // Construct the suffix to pass down.
-          tmpSuffix.resize(0);
-          tmpSuffix.push_back('_');
-          tmpSuffix.append(elt.name.getValue());
-          fields.emplace_back(elt.type, i, bundle.getFieldID(i), tmpSuffix,
-                              elt.isFlip);
-        }
-        return true;
-      })
-      .Case<FVectorType>([&](auto vector) {
-        // Increment the field ID to point to the first element.
-        for (size_t i = 0, e = vector.getNumElements(); i != e; ++i) {
-          fields.emplace_back(vector.getElementType(), i, vector.getFieldID(i),
-                              "_" + std::to_string(i), false);
-        }
-        return true;
-      })
-      .Default([](auto op) { return false; });
+/// Update an ArrayAttribute by replacing one entry.
+static ArrayAttr replaceArrayAttrElement(ArrayAttr array, size_t elem,
+                                         Attribute newVal) {
+  SmallVector<Attribute> old(array.begin(), array.end());
+  old[elem] = newVal;
+  return ArrayAttr::get(array.getContext(), old);
 }
 
-void IMCombCycleResolverPass::rewriteModuleSignature(FModuleOp module) {
+/// Construct the annotation array with a new thing appended.
+static ArrayAttr appendArrayAttr(ArrayAttr array, Attribute a) {
+  if (!array)
+    return ArrayAttr::get(a.getContext(), ArrayRef<Attribute>{a});
+  SmallVector<Attribute> old(array.begin(), array.end());
+  old.push_back(a);
+  return ArrayAttr::get(a.getContext(), old);
+}
+
+void IMCombCycleResolverPass::rewriteModuleSignature(FModuleOp module,
+                                                     InstanceGraph *graph) {
   // If the module is unreachable, just ignore it.
   // TODO: Erase this module from circuit op.
   if (!isBlockExecutable(module.getBodyBlock()))
     return;
-
+  auto portInfos = module.getPortAnnotationsAttr();
   for (auto v : module.getArguments()) {
     if (v.getType().isa<FVectorType>()) {
       if (isAssumedDead(v))
         numCanPreserve++;
       else {
+        // ArrayAttr
+        auto newVal = appendArrayAttr(
+            portInfos[v.getArgNumber()].cast<ArrayAttr>(),
+            DictionaryAttr::get(
+                module.getContext(),
+                {NamedAttribute(StringAttr::get(module.getContext(), "class"),
+                                StringAttr::get(module.getContext(),
+                                                "circt.lowerAggregate"))}));
+        portInfos =
+            replaceArrayAttrElement(portInfos, v.getArgNumber(), newVal);
         numMustLowered++;
       }
     }
+  }
+  module->setAttr("portAnnotations", portInfos);
+  auto node = instanceGraph->lookup(module.moduleNameAttr());
+  for (auto n : node->uses()) {
+    auto inst = cast<firrtl::InstanceOp>(n->getInstance());
+    auto anno = inst.getPortAnnotationsAttr();
+    for (auto v : module.getArguments()) {
+      if (v.getType().isa<FVectorType>()) {
+        if (isKnownAlive(v)) {
+          auto newVal = appendArrayAttr(
+              anno[v.getArgNumber()].cast<ArrayAttr>(),
+              DictionaryAttr::get(
+                  module.getContext(),
+                  {NamedAttribute(StringAttr::get(module.getContext(),
+                                                  "circt.lowerAggregate"),
+                                  UnitAttr::get(module.getContext()))}));
+          anno = replaceArrayAttrElement(anno, v.getArgNumber(), newVal);
+        }
+      }
+    }
+    inst.setPortAnnotationsAttr(anno);
   }
 
   return;
