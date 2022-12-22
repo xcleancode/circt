@@ -129,11 +129,12 @@ public:
   /// Get the sub-type of a type for a field ID, and the subfield's ID. Strip
   /// off a single layer of this type and return the sub-type and a field ID
   /// targeting the same field, but rebased on the sub-type.
-  std::pair<FIRRTLBaseType, unsigned> getSubTypeByFieldID(unsigned fieldID);
+  std::pair<circt::hw::FieldIDTypeInterface, unsigned>
+  getSubTypeByFieldID(unsigned fieldID);
 
   /// Return the final type targeted by this field ID by recursively walking all
   /// nested aggregate types. This is the identity function for ground types.
-  FIRRTLBaseType getFinalTypeByFieldID(unsigned fieldID);
+  circt::hw::FieldIDTypeInterface getFinalTypeByFieldID(unsigned fieldID);
 
   /// Returns the effective field id when treating the index field as the
   /// root of the type.  Essentially maps a fieldID to a fieldID after a
@@ -356,7 +357,8 @@ public:
 
   /// Strip off a single layer of this type and return the sub-type and a field
   /// ID targeting the same field, but rebased on the sub-type.
-  std::pair<FIRRTLBaseType, unsigned> getSubTypeByFieldID(unsigned fieldID);
+  std::pair<circt::hw::FieldIDTypeInterface, unsigned>
+  getSubTypeByFieldID(unsigned fieldID);
 
   /// Get the maximum field ID in this bundle.  This is helpful for constructing
   /// field IDs when this BundleType is nested in another aggregate type.
@@ -407,7 +409,8 @@ public:
 
   /// Strip off a single layer of this type and return the sub-type and a field
   /// ID targeting the same field, but rebased on the sub-type.
-  std::pair<FIRRTLBaseType, size_t> getSubTypeByFieldID(size_t fieldID);
+  std::pair<circt::hw::FieldIDTypeInterface, size_t>
+  getSubTypeByFieldID(size_t fieldID);
 
   /// Get the maximum field ID in this vector.  This is helpful for constructing
   /// field IDs when this VectorType is nested in another aggregate type.

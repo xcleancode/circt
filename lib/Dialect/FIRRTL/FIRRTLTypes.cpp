@@ -12,6 +12,7 @@
 
 #include "circt/Dialect/FIRRTL/FIRRTLTypes.h"
 #include "circt/Dialect/FIRRTL/FIRRTLOps.h"
+#include "circt/Dialect/HW/HWTypeInterfaces.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringSwitch.h"
@@ -486,9 +487,10 @@ unsigned FIRRTLBaseType::getMaxFieldID() {
       });
 }
 
-std::pair<FIRRTLBaseType, unsigned>
+std::pair<circt::hw::FieldIDTypeInterface, unsigned>
 FIRRTLBaseType::getSubTypeByFieldID(unsigned fieldID) {
-  return TypeSwitch<FIRRTLBaseType, std::pair<FIRRTLBaseType, unsigned>>(*this)
+  return TypeSwitch<FIRRTLBaseType,
+                    std::pair<circt::hw::FieldIDTypeInterface, unsigned>>(*this)
       .Case<AnalogType, ClockType, ResetType, AsyncResetType, SIntType,
             UIntType>([&](FIRRTLBaseType t) {
         assert(!fieldID && "non-aggregate types must have a field id of 0");
@@ -502,8 +504,9 @@ FIRRTLBaseType::getSubTypeByFieldID(unsigned fieldID) {
       });
 }
 
-FIRRTLBaseType FIRRTLBaseType::getFinalTypeByFieldID(unsigned fieldID) {
-  std::pair<FIRRTLBaseType, unsigned> pair(*this, fieldID);
+circt::hw::FieldIDTypeInterface
+FIRRTLBaseType::getFinalTypeByFieldID(unsigned fieldID) {
+  std::pair<circt::hw::FieldIDTypeInterface, unsigned> pair(*this, fieldID);
   while (pair.second)
     pair = pair.first.getSubTypeByFieldID(pair.second);
   return pair.first;
@@ -941,7 +944,7 @@ unsigned BundleType::getIndexForFieldID(unsigned fieldID) {
   return std::distance(fieldIDs.begin(), it);
 }
 
-std::pair<FIRRTLBaseType, unsigned>
+std::pair<circt::hw::FieldIDTypeInterface, unsigned>
 BundleType::getSubTypeByFieldID(unsigned fieldID) {
   if (fieldID == 0)
     return {*this, 0};
@@ -1043,7 +1046,7 @@ size_t FVectorType::getIndexForFieldID(size_t fieldID) {
   return (fieldID - 1) / (getElementType().getMaxFieldID() + 1);
 }
 
-std::pair<FIRRTLBaseType, size_t>
+std::pair<circt::hw::FieldIDTypeInterface, size_t>
 FVectorType::getSubTypeByFieldID(size_t fieldID) {
   if (fieldID == 0)
     return {*this, 0};
