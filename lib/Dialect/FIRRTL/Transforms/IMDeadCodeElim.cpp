@@ -158,9 +158,9 @@ void IMDeadCodeElimPass::markBlockExecutable(Block *block) {
   if (!executableBlocks.insert(block).second)
     return; // Already executable.
 
-  // Mark ports with don't touch as alive.
+  // Mark ports with don't touch or const as alive.
   for (auto blockArg : block->getArguments())
-    if (hasDontTouch(blockArg))
+    if (hasDontTouch(blockArg) || isConst(blockArg.getType()))
       markAlive(blockArg);
 
   for (auto &op : *block) {
@@ -235,6 +235,13 @@ void IMDeadCodeElimPass::runOnOperation() {
       markBlockExecutable(module.getBodyBlock());
       for (auto port : module.getBodyBlock()->getArguments())
         markAlive(port);
+    } else {
+      // Mark any const ports as alive.
+      for (auto port : module.getBodyBlock()->getArguments()) {
+        if (auto baseType = port.getType().dyn_cast<FIRRTLBaseType>();
+            baseType && baseType.isConst())
+          markAlive(port);
+      }
     }
   }
 
@@ -390,8 +397,8 @@ void IMDeadCodeElimPass::rewriteModuleSignature(FModuleOp module) {
     assert((!hasDontTouch(argument) || isKnownAlive(argument)) &&
            "If the port has don't touch, it should be known alive");
 
-    // If the port has dontTouch, skip.
-    if (hasDontTouch(argument))
+    // If the port has dontTouch or is const, skip.
+    if (hasDontTouch(argument) || isConst(argument.getType()))
       continue;
 
     // If the port is known alive, then we can't delete it except for write-only
