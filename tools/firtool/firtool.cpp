@@ -828,7 +828,7 @@ static LogicalResult processBuffer(
         modulePM.addPass(createCSEPass());
         modulePM.addPass(createSimpleCanonicalizerPass());
         modulePM.addPass(createCSEPass());
-        modulePM.addPass(sv::createHWCleanupPass());
+        modulePM.addPass(sv::createHWCleanupPass(/*convertIfToCase*/ true));
       }
     }
   }

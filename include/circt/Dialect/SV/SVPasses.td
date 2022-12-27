@@ -25,6 +25,10 @@ def HWCleanup : Pass<"hw-cleanup", "hw::HWModuleOp"> {
   }];
 
   let constructor = "circt::sv::createHWCleanupPass()";
+  let options = [
+    Option<"convertIfToCase", "convert-if-to-case",
+           "bool", "false", "Convert if ops to case op">
+   ];
 }
 
 def HWLegalizeModules : Pass<"hw-legalize-modules", "hw::HWModuleOp"> {
