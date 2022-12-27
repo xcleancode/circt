@@ -1152,7 +1152,7 @@ static bool tryMergeRanges(OrOp op, PatternRewriter &rewriter) {
 
   // Identify all the relevant patterns among the inputs,
   // mark all others to be retained unchanged.
-  auto inputs = op.inputs();
+  auto inputs = op.getInputs();
   llvm::SmallBitVector keptOperands(inputs.size());
   DenseMap<Value, SmallVector<Interval>> argChecks;
 
@@ -1161,18 +1161,18 @@ static bool tryMergeRanges(OrOp op, PatternRewriter &rewriter) {
 
     // Find bound checks: and(x > n, x < m)
     auto andOp = input.getDefiningOp<AndOp>();
-    if (andOp && andOp.inputs().size() == 2) {
-      ICmpOp lhsOp = andOp.inputs()[0].getDefiningOp<ICmpOp>();
-      ICmpOp rhsOp = andOp.inputs()[1].getDefiningOp<ICmpOp>();
+    if (andOp && andOp.getInputs().size() == 2) {
+      ICmpOp lhsOp = andOp.getInputs()[0].getDefiningOp<ICmpOp>();
+      ICmpOp rhsOp = andOp.getInputs()[1].getDefiningOp<ICmpOp>();
 
-      if (lhsOp && rhsOp && lhsOp.lhs() == rhsOp.lhs()) {
-        Value arg = lhsOp.lhs();
+      if (lhsOp && rhsOp && lhsOp.getLhs() == rhsOp.getLhs()) {
+        Value arg = lhsOp.getLhs();
 
         APInt lhsBound, rhsBound;
-        if (matchPattern(lhsOp.rhs(), m_RConstant(lhsBound)) &&
-            matchPattern(rhsOp.rhs(), m_RConstant(rhsBound))) {
-          ICmpPredicate lhsPred = lhsOp.predicate();
-          ICmpPredicate rhsPred = rhsOp.predicate();
+        if (matchPattern(lhsOp.getRhs(), m_RConstant(lhsBound)) &&
+            matchPattern(rhsOp.getRhs(), m_RConstant(rhsBound))) {
+          ICmpPredicate lhsPred = lhsOp.getPredicate();
+          ICmpPredicate rhsPred = rhsOp.getPredicate();
           // If the lower bound is all ones or the upper bound is all
           // zeros, the interval is empty and the comparisons are eliminated
           // through other canonicalisers.
@@ -1196,16 +1196,16 @@ static bool tryMergeRanges(OrOp op, PatternRewriter &rewriter) {
 
     if (auto cmpOp = input.getDefiningOp<ICmpOp>()) {
       APInt v;
-      if (matchPattern(cmpOp.rhs(), m_RConstant(v))) {
+      if (matchPattern(cmpOp.getRhs(), m_RConstant(v))) {
         // Find equality tests: x == n
-        if (cmpOp.predicate() == ICmpPredicate::eq) {
-          argChecks[cmpOp.lhs()].emplace_back(Interval{i, v, v});
+        if (cmpOp.getPredicate() == ICmpPredicate::eq) {
+          argChecks[cmpOp.getLhs()].emplace_back(Interval{i, v, v});
           continue;
         }
         // Find upper bound tests: x < n
-        if (cmpOp.predicate() == ICmpPredicate::ult) {
+        if (cmpOp.getPredicate() == ICmpPredicate::ult) {
           if (!v.isZero()) {
-            argChecks[cmpOp.lhs()].emplace_back(
+            argChecks[cmpOp.getLhs()].emplace_back(
                 Interval{i, APInt::getZero(v.getBitWidth()), v - 1});
           }
           continue;
@@ -1264,9 +1264,9 @@ static bool tryMergeRanges(OrOp op, PatternRewriter &rewriter) {
       if (lowerBound.isZero() && upperBound.isAllOnes())
         foldsToTrue = true;
       else if (lowerBound.isZero())
-        newChecks[arg].emplace_back(loc, llvm::None, upperBound + 1);
+        newChecks[arg].emplace_back(loc, std::nullopt, upperBound + 1);
       else if (upperBound.isAllOnes())
-        newChecks[arg].emplace_back(loc, lowerBound - 1, llvm::None);
+        newChecks[arg].emplace_back(loc, lowerBound - 1, std::nullopt);
       else
         newChecks[arg].emplace_back(loc, lowerBound - 1, upperBound + 1);
     }

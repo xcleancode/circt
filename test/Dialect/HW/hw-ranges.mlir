@@ -121,9 +121,9 @@ hw.module @extend_ranges(%arg: i32) -> (cond: i1) {
 }
 
 // CHECK-LABEL: @make_lower_bound
-// CHECK_DAG: [[BOUND:%.*]] = hw.constant 6 : i32
-// CHECK_DAG: [[RESULT:%.*]] = comb.icmp ult %arg, [[BOUND]] : i32
-// CHECK_DAG: hw.output [[RESULT]] : i1
+// CHECK-DAG: [[BOUND:%.*]] = hw.constant 6 : i32
+// CHECK-DAG: [[RESULT:%.*]] = comb.icmp ult %arg, [[BOUND]] : i32
+// CHECK-DAG: hw.output [[RESULT]] : i1
 hw.module @make_lower_bound(%arg: i32) -> (cond: i1) {
   %cst0 = hw.constant 0 : i32
   %is0 = comb.icmp eq %cst0, %arg : i32
