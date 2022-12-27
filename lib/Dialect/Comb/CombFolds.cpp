@@ -1136,6 +1136,8 @@ static bool canonicalizeOrOfConcatsWithCstOperands(OrOp op, size_t concatIdx1,
 /// All constants and operations operate in unsigned mode.
 ///
 static bool tryMergeRanges(OrOp op, PatternRewriter &rewriter) {
+  if (!op.getTwoState())
+    return false;
 
   // Wrapper around an operand representing an interval.
   struct Interval {
@@ -1161,11 +1163,12 @@ static bool tryMergeRanges(OrOp op, PatternRewriter &rewriter) {
 
     // Find bound checks: and(x > n, x < m)
     auto andOp = input.getDefiningOp<AndOp>();
-    if (andOp && andOp.getInputs().size() == 2) {
+    if (andOp && andOp.getTwoState() && andOp.getInputs().size() == 2) {
       ICmpOp lhsOp = andOp.getInputs()[0].getDefiningOp<ICmpOp>();
       ICmpOp rhsOp = andOp.getInputs()[1].getDefiningOp<ICmpOp>();
 
-      if (lhsOp && rhsOp && lhsOp.getLhs() == rhsOp.getLhs()) {
+      if (lhsOp && rhsOp && lhsOp.getLhs() == rhsOp.getLhs() &&
+          lhsOp.getTwoState() && rhsOp.getTwoState()) {
         Value arg = lhsOp.getLhs();
 
         APInt lhsBound, rhsBound;
@@ -1196,7 +1199,7 @@ static bool tryMergeRanges(OrOp op, PatternRewriter &rewriter) {
 
     if (auto cmpOp = input.getDefiningOp<ICmpOp>()) {
       APInt v;
-      if (matchPattern(cmpOp.getRhs(), m_RConstant(v))) {
+      if (cmpOp.getTwoState() && matchPattern(cmpOp.getRhs(), m_RConstant(v))) {
         // Find equality tests: x == n
         if (cmpOp.getPredicate() == ICmpPredicate::eq) {
           argChecks[cmpOp.getLhs()].emplace_back(Interval{i, v, v});
@@ -1296,19 +1299,21 @@ static bool tryMergeRanges(OrOp op, PatternRewriter &rewriter) {
       if (upperBound) {
         upperBoundCheck = rewriter.create<ICmpOp>(
             loc, rewriter.getI1Type(), ICmpPredicate::ult, arg,
-            rewriter.create<hw::ConstantOp>(loc, *upperBound));
+            rewriter.create<hw::ConstantOp>(loc, *upperBound),
+            /*twoState=*/true);
       }
 
       Value lowerBoundCheck;
       if (lowerBound) {
         lowerBoundCheck = rewriter.create<ICmpOp>(
             loc, rewriter.getI1Type(), ICmpPredicate::ugt, arg,
-            rewriter.create<hw::ConstantOp>(loc, *lowerBound));
+            rewriter.create<hw::ConstantOp>(loc, *lowerBound),
+            /*twoState=*/true);
       }
 
       if (lowerBoundCheck && upperBoundCheck)
-        newInputs.push_back(
-            rewriter.create<AndOp>(loc, lowerBoundCheck, upperBoundCheck));
+        newInputs.push_back(rewriter.create<AndOp>(
+            loc, lowerBoundCheck, upperBoundCheck, /*twoState=*/true));
       else if (lowerBoundCheck)
         newInputs.push_back(lowerBoundCheck);
       else if (upperBoundCheck)
@@ -1322,7 +1327,8 @@ static bool tryMergeRanges(OrOp op, PatternRewriter &rewriter) {
     rewriter.replaceOp(op, newInputs[0]);
   } else {
     assert(newInputs.size() > 1 && "OrOp expects at least two inputs");
-    rewriter.replaceOpWithNewOp<OrOp>(op, op.getType(), newInputs);
+    rewriter.replaceOpWithNewOp<OrOp>(op, op.getType(), newInputs,
+                                      /*twoState=*/true);
   }
   return true;
 }
