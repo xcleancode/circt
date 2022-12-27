@@ -923,6 +923,10 @@ LogicalResult FIRRTLModuleLowering::lowerPorts(
   size_t numArgs = 0;
   size_t numResults = 0;
   for (auto firrtlPort : firrtlPorts) {
+    // Drop const ports at the HW level
+    if (isConst(firrtlPort.type))
+      continue;
+
     hw::PortInfo hwPort;
     hwPort.name = firrtlPort.name;
     hwPort.type = lowerType(firrtlPort.type);
@@ -1351,6 +1355,15 @@ FIRRTLModuleLowering::lowerModuleBody(FModuleOp oldModule,
   for (auto &port : ports) {
     // Inputs and outputs are both modeled as arguments in the FIRRTL level.
     auto oldArg = oldModule.getBody().getArgument(firrtlArg++);
+
+    // Lower const ports to a wire that isn't connected to
+    // anything outside the module
+    if (isConst(port.type)) {
+      Value newArg = bodyBuilder.create<WireOp>(
+          port.type, "." + port.getName().str() + ".const");
+      oldArg.replaceAllUsesWith(newArg);
+      continue;
+    }
 
     bool isZeroWidth =
         port.type.isa<FIRRTLBaseType>() &&
@@ -2413,6 +2426,15 @@ FIRRTLLowering::handleUnloweredOp(Operation *op) {
     return AlreadyLowered;
   }
 
+  // If all operands and results are const, ignore the op
+  if (llvm::all_of(op->getOperandTypes(), isConst) &&
+      llvm::all_of(op->getResultTypes(), isConst)) {
+    for (auto result : op->getResults())
+      // Const values lower to the null value
+      (void)setLowering(result, Value());
+    return NowLowered;
+  }
+
   // Ok, at least one operand got lowered, so this operation is using a FIRRTL
   // value, but wasn't itself lowered.  This is because the lowering is
   // incomplete. This is either a bug or incomplete implementation.
@@ -2431,6 +2453,7 @@ FIRRTLLowering::handleUnloweredOp(Operation *op) {
       return NowLowered;
     }
   }
+
   op->emitOpError("LowerToHW couldn't handle this operation");
   return LoweringFailure;
 }
@@ -2959,6 +2982,11 @@ LogicalResult FIRRTLLowering::visitDecl(InstanceOp oldInstance) {
   SmallVector<Value, 8> operands;
   for (size_t portIndex = 0, e = portInfo.size(); portIndex != e; ++portIndex) {
     auto &port = portInfo[portIndex];
+
+    // Drop const ports
+    if (isConst(port.type))
+      continue;
+
     auto portType = lowerType(port.type);
     if (!portType) {
       oldInstance->emitOpError("could not lower type of port ") << port.name;
@@ -3054,7 +3082,8 @@ LogicalResult FIRRTLLowering::visitDecl(InstanceOp oldInstance) {
   unsigned resultNo = 0;
   for (size_t portIndex = 0, e = portInfo.size(); portIndex != e; ++portIndex) {
     auto &port = portInfo[portIndex];
-    if (!port.isOutput() || isZeroBitFIRRTLType(port.type))
+    if (!port.isOutput() || isZeroBitFIRRTLType(port.type) ||
+        isConst(port.type))
       continue;
 
     Value resultVal = newInstance.getResult(resultNo);
