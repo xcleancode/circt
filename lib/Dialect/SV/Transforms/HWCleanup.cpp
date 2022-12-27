@@ -321,10 +321,13 @@ void HWCleanupPass::runOnProceduralRegion(Region &region) {
     // Merge 'if' operations with the same condition.
     if (auto ifop = dyn_cast<sv::IfOp>(op)) {
       if (auto prevIf = dyn_cast_or_null<sv::IfOp>(lastSideEffectingOp)) {
-        if (ifop.getCond() == prevIf.getCond()) {
-          // We know that there are no side effective operations between the
-          // two, so merge the first one into this one.
-          mergeOperationsIntoFrom(ifop, prevIf);
+        auto mergedIfOp = tryMergingIfOps(ifop, prevIf);
+        // If a new if op is returned, we have to update lastSideEffectingOp and
+        // the iterator because if ops are sunk.
+        if (mergedIfOp != ifop) {
+          lastSideEffectingOp = mergedIfOp;
+          it = mergedIfOp->getIterator();
+          continue;
         }
       }
     }
