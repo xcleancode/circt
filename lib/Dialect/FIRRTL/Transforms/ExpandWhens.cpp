@@ -125,12 +125,14 @@ protected:
   /// for retrieving the responsible connect operation.
   ScopedDriverMap &driverMap;
 
-  bool insideNonConstWhen;
+  enum class ConditionKind { None, Const, NonConst };
+
+  ConditionKind conditionKind;
 
 public:
   LastConnectResolver(ScopedDriverMap &driverMap,
-                      bool insideNonConstWhen = false)
-      : driverMap(driverMap), insideNonConstWhen(insideNonConstWhen) {}
+                      ConditionKind conditionKind = ConditionKind::None)
+      : driverMap(driverMap), conditionKind(conditionKind) {}
 
   using FIRRTLVisitor<ConcreteT>::visitExpr;
   using FIRRTLVisitor<ConcreteT>::visitDecl;
@@ -140,12 +142,23 @@ public:
   /// delete a previous connection to a destination if there was one. Returns
   /// true if an old connect was erased.
   bool setLastConnect(FieldRef dest, Operation *connection) {
-    if (insideNonConstWhen) {
+    switch (conditionKind) {
+    case ConditionKind::None:
+      break;
+    case ConditionKind::Const:
+      if (!isConst(dest.getValue().getType())) {
+        connection->emitError(
+            "initialization of non-'const' sink \"" + getFieldName(dest).first +
+            "\" dependent on a 'const' condition is not currently supported");
+      }
+      break;
+    case ConditionKind::NonConst:
       if (isConst(dest.getValue().getType())) {
         connection->emitError(
-            "const sink \"" + getFieldName(dest).first +
-            "\" initialization is dependent on a non-const condition");
+            "'const' sink \"" + getFieldName(dest).first +
+            "\" initialization is dependent on a non-'const' condition");
       }
+      break;
     }
 
     // Try to insert, if it doesn't insert, replace the previous value.
@@ -442,7 +455,8 @@ class WhenOpVisitor : public LastConnectResolver<WhenOpVisitor> {
 public:
   WhenOpVisitor(ScopedDriverMap &driverMap, Value condition)
       : LastConnectResolver<WhenOpVisitor>(
-            driverMap, condition ? !isConst(condition.getType()) : false),
+            driverMap, isConst(condition.getType()) ? ConditionKind::Const
+                                                    : ConditionKind::NonConst),
         condition(condition) {}
 
   using LastConnectResolver<WhenOpVisitor>::visitExpr;
