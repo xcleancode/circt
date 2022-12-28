@@ -53,6 +53,7 @@ static LogicalResult customTypePrinter(Type type, AsmPrinter &os,
       .Case<ClockType>([&](auto) { os << "clock"; })
       .Case<ResetType>([&](auto) { os << "reset"; })
       .Case<AsyncResetType>([&](auto) { os << "asyncreset"; })
+      .Case<StringType>([&](auto) { os << "string"; })
       .Case<SIntType>([&](auto sIntType) {
         os << "sint";
         printWidthQualifier(sIntType.getWidth());
@@ -125,6 +126,7 @@ void circt::firrtl::printNestedType(Type type, AsmPrinter &os,
 ///   ::= analog ('<' int '>')?
 ///   ::= bundle '<' (bundle-elt (',' bundle-elt)*)? '>'
 ///   ::= vector '<' type ',' int '>'
+///   ::= string
 ///   ::= const '.' type
 ///
 /// bundle-elt ::= identifier ':' type
@@ -138,6 +140,10 @@ static OptionalParseResult customTypeParser(AsmParser &parser, StringRef name,
     return result = ResetType::get(context), success();
   if (name.equals("asyncreset"))
     return result = AsyncResetType::get(context), success();
+  if (name.equals("string")) {
+    assert(isConst);
+    return result = StringType::get(context), success();
+  }
 
   if (name.equals("sint") || name.equals("uint") || name.equals("analog")) {
     // Parse the width specifier if it exists.
@@ -363,7 +369,7 @@ unsigned RecursiveTypeProperties::toFlags() const {
 bool FIRRTLBaseType::isGround() {
   return TypeSwitch<FIRRTLBaseType, bool>(*this)
       .Case<ClockType, ResetType, AsyncResetType, SIntType, UIntType,
-            AnalogType>([](Type) { return true; })
+            AnalogType, StringType>([](Type) { return true; })
       .Case<BundleType, FVectorType>([](Type) { return false; })
       .Default([](Type) {
         llvm_unreachable("unknown FIRRTL type");
@@ -374,7 +380,7 @@ bool FIRRTLBaseType::isGround() {
 /// Return a pair with the 'isPassive' and 'containsAnalog' bits.
 RecursiveTypeProperties FIRRTLBaseType::getRecursiveTypeProperties() {
   return TypeSwitch<FIRRTLBaseType, RecursiveTypeProperties>(*this)
-      .Case<ClockType, ResetType, AsyncResetType>([](Type) {
+      .Case<ClockType, ResetType, AsyncResetType, StringType>([](Type) {
         return RecursiveTypeProperties{true, false, false};
       })
       .Case<SIntType, UIntType>([](auto type) {
@@ -399,7 +405,7 @@ RecursiveTypeProperties FIRRTLBaseType::getRecursiveTypeProperties() {
 FIRRTLBaseType FIRRTLBaseType::getPassiveType() {
   return TypeSwitch<FIRRTLBaseType, FIRRTLBaseType>(*this)
       .Case<ClockType, ResetType, AsyncResetType, SIntType, UIntType,
-            AnalogType>([&](Type) { return *this; })
+            AnalogType, StringType>([&](Type) { return *this; })
       .Case<BundleType>(
           [](BundleType bundleType) { return bundleType.getPassiveType(); })
       .Case<FVectorType>(
@@ -439,7 +445,8 @@ FIRRTLBaseType FIRRTLBaseType::getMaskType() {
 /// unknown width.
 FIRRTLBaseType FIRRTLBaseType::getWidthlessType() {
   return TypeSwitch<FIRRTLBaseType, FIRRTLBaseType>(*this)
-      .Case<ClockType, ResetType, AsyncResetType>([](auto a) { return a; })
+      .Case<ClockType, ResetType, AsyncResetType, StringType>(
+          [](auto a) { return a; })
       .Case<UIntType, SIntType, AnalogType>(
           [&](auto a) { return a.get(this->getContext(), -1); })
       .Case<BundleType>([&](auto a) {
@@ -467,6 +474,7 @@ FIRRTLBaseType FIRRTLBaseType::getWidthlessType() {
 int32_t FIRRTLBaseType::getBitWidthOrSentinel() {
   return TypeSwitch<FIRRTLBaseType, int32_t>(*this)
       .Case<ClockType, ResetType, AsyncResetType>([](Type) { return 1; })
+      .Case<StringType>([](Type) { return 0; })
       .Case<SIntType, UIntType>(
           [&](IntType intType) { return intType.getWidthOrSentinel(); })
       .Case<AnalogType>(
@@ -557,6 +565,7 @@ bool FIRRTLBaseType::isConst() {
           [](Type) { return false; })
       .Case<SIntType, UIntType, BundleType, FVectorType>(
           [](auto type) { return type.isConst(); })
+      .Case<StringType>([](Type) { return true; })
       .Default([](Type) {
         llvm_unreachable("unknown FIRRTL type");
         return false;
@@ -1177,6 +1186,7 @@ AnalogType AnalogType::get(mlir::MLIRContext *context) {
 
 void FIRRTLDialect::registerTypes() {
   addTypes<SIntType, UIntType, ClockType, ResetType, AsyncResetType, AnalogType,
+           StringType,
            // Derived Types
            BundleType, FVectorType, RefType>();
 }

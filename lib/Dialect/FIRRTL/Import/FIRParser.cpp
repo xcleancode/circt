@@ -639,6 +639,7 @@ ParseResult FIRParser::parseFieldId(StringRef &result, const Twine &message) {
 /// type ::= 'Clock'
 ///      ::= 'Reset'
 ///      ::= 'AsyncReset'
+///      ::= 'String'
 ///      ::= 'UInt' optional-width
 ///      ::= 'SInt' optional-width
 ///      ::= 'Analog' optional-width
@@ -667,6 +668,13 @@ ParseResult FIRParser::parseType(FIRRTLType &result, const Twine &message,
   case FIRToken::kw_AsyncReset:
     consumeToken(FIRToken::kw_AsyncReset);
     result = AsyncResetType::get(getContext());
+    break;
+
+  case FIRToken::kw_String:
+    if (constState != ConstState::Const)
+      return emitError("'String' type must be 'const'");
+    consumeToken(FIRToken::kw_String);
+    result = StringType::get(getContext());
     break;
 
   case FIRToken::kw_UInt:
@@ -1167,6 +1175,7 @@ private:
   ParseResult parsePostFixDynamicSubscript(Value &result);
   ParseResult parsePrimExp(Value &result);
   ParseResult parseIntegerLiteralExp(Value &result, bool isConst);
+  ParseResult parseStringLiteralExp(Value &result);
 
   std::optional<ParseResult> parseExpWithLeadingKeyword(FIRToken keyword);
 
@@ -1361,6 +1370,13 @@ ParseResult FIRStmtParser::parseExpImpl(Value &result, const Twine &message,
   case FIRToken::kw_UInt:
   case FIRToken::kw_SInt:
     if (parseIntegerLiteralExp(result, isConst))
+      return failure();
+    break;
+
+  case FIRToken::string:
+    if (!isConst)
+      return emitError("string literal expressions must be 'const'");
+    if (parseStringLiteralExp(result))
       return failure();
     break;
 
@@ -1768,6 +1784,17 @@ ParseResult FIRStmtParser::parseIntegerLiteralExp(Value &result, bool isConst) {
 
   if (savedIP.isSet())
     builder.setInsertionPoint(savedIP.getBlock(), savedIP.getPoint());
+  return success();
+}
+
+/// string-literal-exp ::= StringLit
+ParseResult FIRStmtParser::parseStringLiteralExp(Value &result) {
+  locationProcessor.setLoc(getToken().getLoc());
+  // Drop the double quotes and unescape.
+  auto value = builder.getStringAttr(getToken().getStringValue());
+  consumeToken(FIRToken::string);
+  auto op = builder.create<StringConstantOp>(value);
+  result = op.getResult();
   return success();
 }
 

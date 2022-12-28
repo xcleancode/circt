@@ -358,6 +358,11 @@ OpFoldResult AggregateConstantOp::fold(ArrayRef<Attribute> operands) {
   return getFieldsAttr();
 }
 
+OpFoldResult StringConstantOp::fold(ArrayRef<Attribute> operands) {
+  assert(operands.empty() && "constant has no operands");
+  return getValueAttr();
+}
+
 //===----------------------------------------------------------------------===//
 // Binary Operators
 //===----------------------------------------------------------------------===//

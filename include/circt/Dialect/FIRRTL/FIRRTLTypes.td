@@ -142,6 +142,10 @@ def RefType : FIRRTLDialectType<
     and do not represent a circuit element or entity.
   }]>;
 
+def StringType : FIRRTLDialectType<CPred<"$_self.isa<StringType>()">,
+    "string type (always const)", "::circt::firrtl::StringType">,
+  BuildableType<"StringType::get($_builder.getContext())">;
+
 //===----------------------------------------------------------------------===//
 // FIRRTL Types Predicates
 //===----------------------------------------------------------------------===//

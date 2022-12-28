@@ -50,4 +50,8 @@ def AnalogTypeImpl : FIRRTLImplType<"Analog",
 
 }
 
+def StringTypeImpl : FIRRTLImplType<"String", [FieldIDTypeInterface]> {
+  let summary = "String type";
+}
+
 #endif // CIRCT_DIALECT_FIRRTL_FIRRTLTYPESIMPL_TD

@@ -153,6 +153,22 @@ def AggregateConstantOp : FIRRTLOp<"aggregateconstant", [Pure, ConstantLike]> {
   let hasVerifier = 1;
 }
 
+def StringConstantOp : FIRRTLOp<"stringconstant", [Pure, ConstantLike]> {
+  let summary = "Produce a constant of string value";
+  let description = [{
+    This operation produces a constant string literal.
+    ```
+    %result = firrtl.stringconstant "abc" : !firrtl.const.string
+    ```
+    }];
+
+  let arguments = (ins StrAttr:$value);
+  let results = (outs StringType:$result);
+
+  let assemblyFormat = "$value attr-dict `:` type($result)";
+  let hasFolder = 1;
+}
+
 def BundleCreateOp : FIRRTLOp<"bundlecreate"> {
   let summary = "Produce a bundle value";
   let description = [{
