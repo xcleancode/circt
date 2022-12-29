@@ -226,7 +226,14 @@ def FModuleLike : OpInterface<"FModuleLike"> {
 
     InterfaceMethod<"Erases the ports that have their corresponding bit set in `portIndices`",
     "void", "erasePorts",
-    (ins "const llvm::BitVector&":$portIndices)>
+    (ins "const llvm::BitVector&":$portIndices)>,
+
+    //===------------------------------------------------------------------===//
+    // SSA Presence
+    //===------------------------------------------------------------------===//
+
+    InterfaceMethod<"Get the module argument ssa presence",
+    "ModuleArgumentSSAPresence", "ssaPresence">
   ];
 
   let extraClassDeclaration = [{

@@ -231,23 +231,24 @@ bool firrtl::hasDontTouch(Value value) {
 
 /// Get a special name to use when printing the entry block arguments of the
 /// region contained by an operation in this dialect.
-void getAsmBlockArgumentNamesImpl(Operation *op, mlir::Region &region,
+void getAsmBlockArgumentNamesImpl(FModuleLike module, mlir::Region &region,
                                   OpAsmSetValueNameFn setNameFn) {
   if (region.empty())
     return;
-  auto *parentOp = op;
   auto *block = &region.front();
-  // Check to see if the operation containing the arguments has 'firrtl.name'
-  // attributes for them.  If so, use that as the name.
-  auto argAttr = parentOp->getAttrOfType<ArrayAttr>("portNames");
-  // Do not crash on invalid IR.
-  if (!argAttr || argAttr.size() != block->getNumArguments())
-    return;
 
-  for (size_t i = 0, e = block->getNumArguments(); i != e; ++i) {
-    auto str = argAttr[i].cast<StringAttr>().getValue();
-    if (!str.empty())
-      setNameFn(block->getArgument(i), str);
+  bool constOnly = module.ssaPresence() == ModuleArgumentSSAPresence::ConstOnly;
+  size_t numPorts = getNumPorts(module);
+  size_t argumentIndex = 0;
+  for (size_t portIndex = 0; portIndex < numPorts; ++portIndex) {
+    if (constOnly && !isConst(module.getPortType(portIndex)))
+      continue;
+
+    auto str = module.getPortName(portIndex);
+    if (!str.empty()) {
+      setNameFn(block->getArgument(argumentIndex), str);
+      ++argumentIndex;
+    }
   }
 }
 
@@ -693,6 +694,21 @@ void FExtModuleOp::build(OpBuilder &builder, OperationState &result,
     result.addAttribute("defname", builder.getStringAttr(defnameAttr));
   if (!parameters)
     result.addAttribute("parameters", builder.getArrayAttr({}));
+
+  // Create a block for the body if any ports are 'const'.
+  auto *bodyRegion = result.regions[0].get();
+  Block *body = nullptr;
+
+  // Add 'const' arguments to the body block.
+  for (auto port : ports) {
+    if (isConst(port.type)) {
+      if (!body) {
+        body = new Block();
+        bodyRegion->push_back(body);
+      }
+      body->addArgument(port.type, port.loc);
+    }
+  }
 }
 
 void FMemModuleOp::build(OpBuilder &builder, OperationState &result,
@@ -736,7 +752,8 @@ static bool printModulePorts(OpAsmPrinter &p, Block *block,
                              ArrayRef<Attribute> portNames,
                              ArrayRef<Attribute> portTypes,
                              ArrayRef<Attribute> portAnnotations,
-                             ArrayRef<Attribute> portSyms) {
+                             ArrayRef<Attribute> portSyms,
+                             ModuleArgumentSSAPresence ssaPresence) {
   // When printing port names as SSA values, we can fail to print them
   // identically.
   bool printedNamesDontMatch = false;
@@ -745,6 +762,7 @@ static bool printModulePorts(OpAsmPrinter &p, Block *block,
   // block.
   SmallString<32> resultNameStr;
   p << '(';
+  unsigned argumentIndex = 0;
   for (unsigned i = 0, e = portTypes.size(); i < e; ++i) {
     if (i > 0)
       p << ", ";
@@ -752,13 +770,21 @@ static bool printModulePorts(OpAsmPrinter &p, Block *block,
     // Print the port direction.
     p << portDirections[i] << " ";
 
-    // Print the port name.  If there is a valid block, we print it as a block
-    // argument.
-    if (block) {
+    auto portType = portTypes[i].cast<TypeAttr>().getValue();
+    BlockArgument argument;
+    if (block &&
+        (ssaPresence == ModuleArgumentSSAPresence::All || isConst(portType))) {
+      argument = block->getArgument(argumentIndex);
+      argumentIndex++;
+    }
+
+    // Print the port name.  If there is a valid block argument, we print it as
+    // a block argument.
+    if (argument) {
       // Get the printed format for the argument name.
       resultNameStr.clear();
       llvm::raw_svector_ostream tmpStream(resultNameStr);
-      p.printOperand(block->getArgument(i), tmpStream);
+      p.printOperand(argument, tmpStream);
       // If the name wasn't printable in a way that agreed with portName, make
       // sure to print out an explicit portNames attribute.
       auto portName = portNames[i].cast<StringAttr>().getValue();
@@ -771,7 +797,6 @@ static bool printModulePorts(OpAsmPrinter &p, Block *block,
 
     // Print the port type.
     p << ": ";
-    auto portType = portTypes[i].cast<TypeAttr>().getValue();
     p.printType(portType);
 
     // Print the optional port symbol.
@@ -798,7 +823,7 @@ static bool printModulePorts(OpAsmPrinter &p, Block *block,
 /// Parse a list of module ports.  If port names are SSA identifiers, then this
 /// will populate `entryArgs`.
 static ParseResult
-parseModulePorts(OpAsmParser &parser, bool hasSSAIdentifiers,
+parseModulePorts(OpAsmParser &parser, ModuleArgumentSSAPresence ssaPresence,
                  SmallVectorImpl<OpAsmParser::Argument> &entryArgs,
                  SmallVectorImpl<Direction> &portDirections,
                  SmallVectorImpl<Attribute> &portNames,
@@ -817,21 +842,30 @@ parseModulePorts(OpAsmParser &parser, bool hasSSAIdentifiers,
       return failure();
 
     // Parse the port name.
-    if (hasSSAIdentifiers) {
+    bool hasSSAIdentifier = false;
+    if (ssaPresence != ModuleArgumentSSAPresence::None) {
       OpAsmParser::Argument arg;
-      if (parser.parseArgument(arg))
-        return failure();
-      entryArgs.push_back(arg);
-      // The name of an argument is of the form "%42" or "%id", and since
-      // parsing succeeded, we know it always has one character.
-      assert(arg.ssaName.name.size() > 1 && arg.ssaName.name[0] == '%' &&
-             "Unknown MLIR name");
-      if (isdigit(arg.ssaName.name[1]))
-        portNames.push_back(StringAttr::get(context, ""));
-      else
-        portNames.push_back(
-            StringAttr::get(context, arg.ssaName.name.drop_front()));
-    } else {
+      auto argResult = ssaPresence == ModuleArgumentSSAPresence::All
+                           ? parser.parseArgument(arg)
+                           : parser.parseOptionalArgument(arg);
+      if (argResult.has_value()) {
+        if (*argResult)
+          return failure();
+        entryArgs.push_back(arg);
+        hasSSAIdentifier = true;
+        // The name of an argument is of the form "%42" or "%id", and since
+        // parsing succeeded, we know it always has one character.
+        assert(arg.ssaName.name.size() > 1 && arg.ssaName.name[0] == '%' &&
+               "Unknown MLIR name");
+        if (isdigit(arg.ssaName.name[1]))
+          portNames.push_back(StringAttr::get(context, ""));
+        else
+          portNames.push_back(
+              StringAttr::get(context, arg.ssaName.name.drop_front()));
+      }
+    }
+
+    if (!hasSSAIdentifier) {
       std::string portName;
       if (parser.parseKeywordOrString(&portName))
         return failure();
@@ -844,7 +878,7 @@ parseModulePorts(OpAsmParser &parser, bool hasSSAIdentifiers,
       return failure();
     portTypes.push_back(TypeAttr::get(portType));
 
-    if (hasSSAIdentifiers)
+    if (hasSSAIdentifier)
       entryArgs.back().type = portType;
 
     // Parse the optional port symbol.
@@ -917,7 +951,7 @@ static void printFModuleLikeOp(OpAsmPrinter &p, FModuleLike op) {
 
   auto needPortNamesAttr = printModulePorts(
       p, body, portDirections, op.getPortNames(), op.getPortTypes(),
-      op.getPortAnnotations(), op.getPortSymbols());
+      op.getPortAnnotations(), op.getPortSymbols(), op.ssaPresence());
 
   SmallVector<StringRef, 4> omittedAttrs = {
       "sym_name", "portDirections", "portTypes",       "portAnnotations",
@@ -940,25 +974,22 @@ static void printFModuleLikeOp(OpAsmPrinter &p, FModuleLike op) {
   }
 
   p.printOptionalAttrDictWithKeyword(op->getAttrs(), omittedAttrs);
+
+  // Print the body if present. Since this block does
+  // not have terminators, printing the terminator actually just prints the last
+  // operation.
+  if (body) {
+    p << " ";
+    p.printRegion(op->getRegion(0), /*printEntryBlockArgs=*/false,
+                  /*printBlockTerminators=*/true);
+  }
 }
 
 void FExtModuleOp::print(OpAsmPrinter &p) { printFModuleLikeOp(p, *this); }
 
 void FMemModuleOp::print(OpAsmPrinter &p) { printFModuleLikeOp(p, *this); }
 
-void FModuleOp::print(OpAsmPrinter &p) {
-  printFModuleLikeOp(p, *this);
-
-  // Print the body if this is not an external function. Since this block does
-  // not have terminators, printing the terminator actually just prints the last
-  // operation.
-  Region &fbody = getBody();
-  if (!fbody.empty()) {
-    p << " ";
-    p.printRegion(fbody, /*printEntryBlockArgs=*/false,
-                  /*printBlockTerminators=*/true);
-  }
-}
+void FModuleOp::print(OpAsmPrinter &p) { printFModuleLikeOp(p, *this); }
 
 /// Parse an parameter list if present.
 /// module-parameter-list ::= `<` parameter-decl (`,` parameter-decl)* `>`
@@ -993,7 +1024,7 @@ parseOptionalParameters(OpAsmParser &parser,
 
 static ParseResult parseFModuleLikeOp(OpAsmParser &parser,
                                       OperationState &result,
-                                      bool hasSSAIdentifiers) {
+                                      ModuleArgumentSSAPresence ssaPresence) {
   auto *context = result.getContext();
   auto &builder = parser.getBuilder();
 
@@ -1019,7 +1050,7 @@ static ParseResult parseFModuleLikeOp(OpAsmParser &parser,
   SmallVector<Attribute, 4> portTypes;
   SmallVector<Attribute, 4> portAnnotations;
   SmallVector<Attribute, 4> portSyms;
-  if (parseModulePorts(parser, hasSSAIdentifiers, entryArgs, portDirections,
+  if (parseModulePorts(parser, ssaPresence, entryArgs, portDirections,
                        portNames, portTypes, portAnnotations, portSyms))
     return failure();
 
@@ -1074,7 +1105,7 @@ static ParseResult parseFModuleLikeOp(OpAsmParser &parser,
   // Parse the optional function body.
   auto *body = result.addRegion();
 
-  if (hasSSAIdentifiers) {
+  if (ssaPresence == ModuleArgumentSSAPresence::All || !entryArgs.empty()) {
     if (parser.parseRegion(*body, entryArgs))
       return failure();
     if (body->empty())
@@ -1084,15 +1115,16 @@ static ParseResult parseFModuleLikeOp(OpAsmParser &parser,
 }
 
 ParseResult FModuleOp::parse(OpAsmParser &parser, OperationState &result) {
-  return parseFModuleLikeOp(parser, result, /*hasSSAIdentifiers=*/true);
+  return parseFModuleLikeOp(parser, result, ModuleArgumentSSAPresence::All);
 }
 
 ParseResult FExtModuleOp::parse(OpAsmParser &parser, OperationState &result) {
-  return parseFModuleLikeOp(parser, result, /*hasSSAIdentifiers=*/false);
+  return parseFModuleLikeOp(parser, result,
+                            ModuleArgumentSSAPresence::ConstOnly);
 }
 
 ParseResult FMemModuleOp::parse(OpAsmParser &parser, OperationState &result) {
-  return parseFModuleLikeOp(parser, result, /*hasSSAIdentifiers=*/false);
+  return parseFModuleLikeOp(parser, result, ModuleArgumentSSAPresence::None);
 }
 
 LogicalResult FExtModuleOp::verify() {
@@ -1119,17 +1151,29 @@ LogicalResult FExtModuleOp::verify() {
 
 void FModuleOp::getAsmBlockArgumentNames(mlir::Region &region,
                                          mlir::OpAsmSetValueNameFn setNameFn) {
-  getAsmBlockArgumentNamesImpl(getOperation(), region, setNameFn);
+  getAsmBlockArgumentNamesImpl(*this, region, setNameFn);
 }
 
 void FExtModuleOp::getAsmBlockArgumentNames(
     mlir::Region &region, mlir::OpAsmSetValueNameFn setNameFn) {
-  getAsmBlockArgumentNamesImpl(getOperation(), region, setNameFn);
+  getAsmBlockArgumentNamesImpl(*this, region, setNameFn);
 }
 
 void FMemModuleOp::getAsmBlockArgumentNames(
     mlir::Region &region, mlir::OpAsmSetValueNameFn setNameFn) {
-  getAsmBlockArgumentNamesImpl(getOperation(), region, setNameFn);
+  getAsmBlockArgumentNamesImpl(*this, region, setNameFn);
+}
+
+ModuleArgumentSSAPresence FModuleOp::ssaPresence() {
+  return ModuleArgumentSSAPresence::All;
+}
+
+ModuleArgumentSSAPresence FExtModuleOp::ssaPresence() {
+  return ModuleArgumentSSAPresence::ConstOnly;
+}
+
+ModuleArgumentSSAPresence FMemModuleOp::ssaPresence() {
+  return ModuleArgumentSSAPresence::None;
 }
 
 //===----------------------------------------------------------------------===//
@@ -1475,7 +1519,8 @@ void InstanceOp::print(OpAsmPrinter &p) {
   auto portDirections = direction::unpackAttribute(getPortDirectionsAttr());
   printModulePorts(p, /*block=*/nullptr, portDirections,
                    getPortNames().getValue(), portTypes,
-                   getPortAnnotations().getValue(), {});
+                   getPortAnnotations().getValue(), {},
+                   ModuleArgumentSSAPresence::None);
 }
 
 ParseResult InstanceOp::parse(OpAsmParser &parser, OperationState &result) {
@@ -1506,7 +1551,7 @@ ParseResult InstanceOp::parse(OpAsmParser &parser, OperationState &result) {
   if (parseNameKind(parser, nameKind) ||
       parser.parseOptionalAttrDict(result.attributes) ||
       parser.parseAttribute(moduleName, "moduleName", resultAttrs) ||
-      parseModulePorts(parser, /*hasSSAIdentifiers=*/false, entryArgs,
+      parseModulePorts(parser, ModuleArgumentSSAPresence::None, entryArgs,
                        portDirections, portNames, portTypes, portAnnotations,
                        portSyms))
     return failure();

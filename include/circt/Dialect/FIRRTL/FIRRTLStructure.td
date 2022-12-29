@@ -133,7 +133,7 @@ def FModuleOp : FIRRTLModuleLike<"module", [SingleBlock, NoTerminator]> {
 
 }
 
-def FExtModuleOp : FIRRTLModuleLike<"extmodule"> {
+def FExtModuleOp : FIRRTLModuleLike<"extmodule", [NoTerminator]> {
   let summary = "FIRRTL external module";
   let description = [{
     The "firrtl.extmodule" operation represents an external reference to a

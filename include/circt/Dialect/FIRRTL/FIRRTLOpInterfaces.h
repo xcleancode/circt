@@ -96,6 +96,8 @@ struct PortInfo {
         annotations(annos) {}
 };
 
+enum class ModuleArgumentSSAPresence { None, All, ConstOnly };
+
 /// Verification hook for verifying module like operations.
 LogicalResult verifyModuleLikeOpInterface(FModuleLike module);
 

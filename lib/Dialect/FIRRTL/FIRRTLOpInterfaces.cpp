@@ -88,23 +88,41 @@ LogicalResult circt::firrtl::verifyModuleLikeOpInterface(FModuleLike module) {
     return module.emitOpError("requires one region");
 
   // Verify the block arguments.
+  auto ssaPresence = module.ssaPresence();
   auto &body = module->getRegion(0);
   if (!body.empty()) {
-    auto &block = body.front();
-    if (block.getNumArguments() != numPorts)
-      return module.emitOpError("entry block must have ")
-             << numPorts << " arguments to match module signature";
+    if (ssaPresence == ModuleArgumentSSAPresence::None)
+      return module->emitOpError("unexpected module body");
 
-    if (llvm::any_of(
-            llvm::zip(block.getArguments(), portTypes.getValue()),
-            [](auto pair) {
-              auto blockType = std::get<0>(pair).getType();
-              auto portType =
-                  std::get<1>(pair).template cast<TypeAttr>().getValue();
-              return blockType != portType;
-            }))
+    auto &block = body.front();
+    if (block.getNumArguments() != numPorts) {
+      if (ssaPresence == ModuleArgumentSSAPresence::All)
+        return module.emitOpError("entry block must have ")
+               << numPorts << " arguments to match module signature";
+    }
+
+    size_t argumentIndex = 0;
+    for (auto [portIndex, portTypeAttr] :
+         llvm::enumerate(portTypes.getValue())) {
+      auto portType = portTypeAttr.cast<TypeAttr>().getValue();
+      if (ssaPresence == ModuleArgumentSSAPresence::ConstOnly &&
+          !isConst(portType))
+        continue;
+
+      auto blockType = block.getArgument(argumentIndex).getType();
+      argumentIndex++;
+
+      if (blockType != portType)
+        return module.emitOpError(
+            "block argument types should match signature types");
+    }
+
+    if (argumentIndex < block.getNumArguments()) {
+      assert(ssaPresence == ModuleArgumentSSAPresence::ConstOnly);
+      assert(!isConst(block.getArgument(argumentIndex).getType()));
       return module.emitOpError(
-          "block argument types should match signature types");
+          "only 'const' block argument types are allowed");
+    }
   }
 
   return success();

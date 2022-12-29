@@ -1769,9 +1769,9 @@ ParseResult FIRStmtParser::parseIntegerLiteralExp(Value &result, bool isConst) {
   OpBuilder::InsertPoint savedIP;
 
   auto *parentOp = builder.getInsertionBlock()->getParentOp();
-  if (!isa<FModuleOp>(parentOp)) {
+  if (!isa<FModuleLike>(parentOp)) {
     savedIP = builder.saveInsertionPoint();
-    while (!isa<FModuleOp>(parentOp)) {
+    while (!isa<FModuleLike>(parentOp)) {
       builder.setInsertionPoint(parentOp);
       parentOp = builder.getInsertionBlock()->getParentOp();
     }
@@ -2810,7 +2810,7 @@ private:
                             Location defaultLoc, unsigned indent);
 
   struct DeferredModuleToParse {
-    FModuleOp moduleOp;
+    FModuleLike module;
     SmallVector<SMLoc> portLocs;
     FIRLexerCursor lexerCursor;
     std::string moduleTarget;
@@ -2943,7 +2943,8 @@ FIRCircuitParser::parsePortList(SmallVectorImpl<PortInfo> &resultPorts,
 ///
 /// module ::= 'module' id ':' info? INDENT pohwist simple_stmt_block DEDENT
 /// module ::=
-///        'extmodule' id ':' info? INDENT pohwist defname? parameter* DEDENT
+///        'extmodule' id ':' info? INDENT pohwist defname? parameter*
+///        simple_stmt_block? DEDENT
 /// defname   ::= 'defname' '=' id NEWLINE
 ///
 /// parameter ::= 'parameter' id '=' intLit NEWLINE
@@ -2990,116 +2991,119 @@ ParseResult FIRCircuitParser::parseModule(CircuitOp circuit,
     return failure();
   }
 
-  // If this is a normal module, parse the body into an FModuleOp.
-  if (!isExtModule) {
-    auto moduleOp =
-        builder.create<FModuleOp>(info.getLoc(), name, portList, annotations);
+  FModuleLike module;
 
-    // Parse the body of this module after all prototypes have been parsed. This
-    // allows us to handle forward references correctly.
-    deferredModules.emplace_back(
-        DeferredModuleToParse{moduleOp, portLocs, getLexer().getCursor(),
-                              std::move(moduleTarget), indent});
+  if (isExtModule) {
+    // Handle extmodule specific features like parameters.
 
-    // We're going to defer parsing this module, so just skip tokens until we
-    // get to the next module or the end of the file.
-    while (true) {
-      switch (getToken().getKind()) {
-
-      // End of file or invalid token will be handled by outer level.
-      case FIRToken::eof:
-      case FIRToken::error:
-        return success();
-
-        // If we got to the next module, then we're done.
-      case FIRToken::kw_module:
-      case FIRToken::kw_extmodule:
-        return success();
-
-      default:
-        consumeToken();
-        break;
-      }
+    // Parse a defname if present and is an extmodule.
+    // TODO(firrtl spec): defname isn't documented at all, what is it?
+    StringRef defName;
+    if (consumeIf(FIRToken::kw_defname)) {
+      if (parseToken(FIRToken::equal, "expected '=' in defname") ||
+          parseId(defName, "expected defname name"))
+        return failure();
     }
-  }
 
-  // Otherwise, handle extmodule specific features like parameters.
+    SmallVector<Attribute> parameters;
+    SmallPtrSet<StringAttr, 8> seenNames;
 
-  // Parse a defname if present and is an extmodule.
-  // TODO(firrtl spec): defname isn't documented at all, what is it?
-  StringRef defName;
-  if (consumeIf(FIRToken::kw_defname)) {
-    if (parseToken(FIRToken::equal, "expected '=' in defname") ||
-        parseId(defName, "expected defname name"))
-      return failure();
-  }
-
-  SmallVector<Attribute> parameters;
-  SmallPtrSet<StringAttr, 8> seenNames;
-
-  // Parse the parameter list.
-  while (consumeIf(FIRToken::kw_parameter)) {
-    auto loc = getToken().getLoc();
-    StringRef paramName;
-    if (parseId(paramName, "expected parameter name") ||
-        parseToken(FIRToken::equal, "expected '=' in parameter"))
-      return failure();
-
-    Attribute value;
-    switch (getToken().getKind()) {
-    default:
-      return emitError("expected parameter value"), failure();
-
-    case FIRToken::integer:
-    case FIRToken::signed_integer: {
-      APInt result;
-      if (parseIntLit(result, "invalid integer parameter"))
+    // Parse the parameter list.
+    while (consumeIf(FIRToken::kw_parameter)) {
+      auto loc = getToken().getLoc();
+      StringRef paramName;
+      if (parseId(paramName, "expected parameter name") ||
+          parseToken(FIRToken::equal, "expected '=' in parameter"))
         return failure();
 
-      // If the integer parameter is less than 32-bits, sign extend this to a
-      // 32-bit value.  This needs to eventually emit as a 32-bit value in
-      // Verilog and we want to get the size correct immediately.
-      if (result.getBitWidth() < 32)
-        result = result.sext(32);
+      Attribute value;
+      switch (getToken().getKind()) {
+      default:
+        return emitError("expected parameter value"), failure();
 
-      value = builder.getIntegerAttr(
-          builder.getIntegerType(result.getBitWidth(), result.isSignBitSet()),
-          result);
-      break;
-    }
-    case FIRToken::string: {
-      // Drop the double quotes and unescape.
-      value = builder.getStringAttr(getToken().getStringValue());
-      consumeToken(FIRToken::string);
-      break;
-    }
-    case FIRToken::raw_string: {
-      // Drop the single quotes and unescape the ones inside.
-      value = builder.getStringAttr(getToken().getRawStringValue());
-      consumeToken(FIRToken::raw_string);
-      break;
+      case FIRToken::integer:
+      case FIRToken::signed_integer: {
+        APInt result;
+        if (parseIntLit(result, "invalid integer parameter"))
+          return failure();
+
+        // If the integer parameter is less than 32-bits, sign extend this to a
+        // 32-bit value.  This needs to eventually emit as a 32-bit value in
+        // Verilog and we want to get the size correct immediately.
+        if (result.getBitWidth() < 32)
+          result = result.sext(32);
+
+        value = builder.getIntegerAttr(
+            builder.getIntegerType(result.getBitWidth(), result.isSignBitSet()),
+            result);
+        break;
+      }
+      case FIRToken::string: {
+        // Drop the double quotes and unescape.
+        value = builder.getStringAttr(getToken().getStringValue());
+        consumeToken(FIRToken::string);
+        break;
+      }
+      case FIRToken::raw_string: {
+        // Drop the single quotes and unescape the ones inside.
+        value = builder.getStringAttr(getToken().getRawStringValue());
+        consumeToken(FIRToken::raw_string);
+        break;
+      }
+
+      case FIRToken::floatingpoint:
+        double v;
+        if (!llvm::to_float(getTokenSpelling(), v))
+          return emitError("invalid float parameter syntax"), failure();
+
+        value = builder.getF64FloatAttr(v);
+        consumeToken(FIRToken::floatingpoint);
+        break;
+      }
+
+      auto nameId = builder.getStringAttr(paramName);
+      if (!seenNames.insert(nameId).second)
+        return emitError(loc, "redefinition of parameter '" + paramName + "'");
+      parameters.push_back(ParamDeclAttr::get(nameId, value));
     }
 
-    case FIRToken::floatingpoint:
-      double v;
-      if (!llvm::to_float(getTokenSpelling(), v))
-        return emitError("invalid float parameter syntax"), failure();
+    auto fmodule = builder.create<FExtModuleOp>(info.getLoc(), name, portList,
+                                                defName, annotations);
 
-      value = builder.getF64FloatAttr(v);
-      consumeToken(FIRToken::floatingpoint);
-      break;
-    }
-
-    auto nameId = builder.getStringAttr(paramName);
-    if (!seenNames.insert(nameId).second)
-      return emitError(loc, "redefinition of parameter '" + paramName + "'");
-    parameters.push_back(ParamDeclAttr::get(nameId, value));
+    fmodule->setAttr("parameters", builder.getArrayAttr(parameters));
+    module = fmodule;
+  } else {
+    // If this is a normal module, parse the body into an FModuleOp.
+    module =
+        builder.create<FModuleOp>(info.getLoc(), name, portList, annotations);
   }
 
-  auto fmodule = builder.create<FExtModuleOp>(info.getLoc(), name, portList,
-                                              defName, annotations);
+  // Parse the body of this module after all prototypes have been parsed. This
+  // allows us to handle forward references correctly.
+  deferredModules.emplace_back(
+      DeferredModuleToParse{module, portLocs, getLexer().getCursor(),
+                            std::move(moduleTarget), indent});
 
-  fmodule->setAttr("parameters", builder.getArrayAttr(parameters));
+  // We're going to defer parsing this module, so just skip tokens until we
+  // get to the next module or the end of the file.
+  while (true) {
+    switch (getToken().getKind()) {
+
+    // End of file or invalid token will be handled by outer level.
+    case FIRToken::eof:
+    case FIRToken::error:
+      return success();
+
+      // If we got to the next module, then we're done.
+    case FIRToken::kw_module:
+    case FIRToken::kw_extmodule:
+      return success();
+
+    default:
+      consumeToken();
+      break;
+    }
+  }
 
   return success();
 }
@@ -3107,7 +3111,9 @@ ParseResult FIRCircuitParser::parseModule(CircuitOp circuit,
 // Parse the body of this module.
 ParseResult
 FIRCircuitParser::parseModuleBody(DeferredModuleToParse &deferredModule) {
-  FModuleOp moduleOp = deferredModule.moduleOp;
+  auto module = deferredModule.module;
+  auto moduleOp = dyn_cast<FModuleOp>(*module);
+  auto extModuleOp = dyn_cast<FExtModuleOp>(*module);
   auto &portLocs = deferredModule.portLocs;
   auto &moduleTarget = deferredModule.moduleTarget;
 
@@ -3124,33 +3130,54 @@ FIRCircuitParser::parseModuleBody(DeferredModuleToParse &deferredModule) {
   // Install all of the ports into the symbol table, associated with their
   // block arguments.
   Namespace modNameSpace;
-  auto portList = moduleOp.getPorts();
-  auto portArgs = moduleOp.getArguments();
-  for (auto tuple : llvm::zip(portList, portLocs, portArgs)) {
+  auto portList = module.getPorts();
+  Block *body = nullptr;
+  if (moduleOp)
+    body = moduleOp.getBodyBlock();
+  else {
+    auto &bodyRegion = extModuleOp->getRegions().front();
+    if (bodyRegion.empty())
+      // Extmodules with no body need no further processing
+      return success();
+    body = &bodyRegion.front();
+  }
+
+  auto portArgs = body->getArguments();
+
+  size_t argumentIndex = 0;
+  for (auto tuple : llvm::zip(portList, portLocs)) {
     PortInfo &port = std::get<0>(tuple);
     llvm::SMLoc loc = std::get<1>(tuple);
-    BlockArgument portArg = std::get<2>(tuple);
+
+    if (extModuleOp && !isConst(port.type))
+      continue;
+
+    auto portArg = portArgs[argumentIndex];
+    ++argumentIndex;
+
     if (port.sym)
       modNameSpace.newName(port.sym.getSymName().getValue());
     if (moduleContext.addSymbolEntry(port.getName(), portArg, loc))
       return failure();
   }
 
-  FIRStmtParser stmtParser(*moduleOp.getBodyBlock(), moduleContext,
-                           modNameSpace);
+  FIRStmtParser stmtParser(*body, moduleContext, modNameSpace);
 
   // Parse the moduleBlock.
   auto result = stmtParser.parseSimpleStmtBlock(deferredModule.indent);
   if (failed(result))
     return result;
 
+  // Extmodules don't have PrintFOp
+  if (extModuleOp)
+    return success();
+
   // Convert print-encoded verifications after parsing.
 
   // It is dangerous to modify IR in the walk, so accumulate printFOp to
   // buffer.
   SmallVector<PrintFOp> buffer;
-  deferredModule.moduleOp.walk(
-      [&buffer](PrintFOp printFOp) { buffer.push_back(printFOp); });
+  moduleOp.walk([&buffer](PrintFOp printFOp) { buffer.push_back(printFOp); });
 
   for (auto printFOp : buffer) {
     auto result = circt::firrtl::foldWhenEncodedVerifOp(printFOp);
