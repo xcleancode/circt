@@ -127,7 +127,7 @@ private:
     }
 
     llvm::for_each(andOp.getOperands(),
-                   [&](Value cond) { result.insert(cond); });
+                   [&](Value cond) { peelOperands(cond, result); });
   }
 };
 
