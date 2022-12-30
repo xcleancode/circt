@@ -52,7 +52,7 @@ struct Emitter {
   void emitModule(FModuleOp op);
   void emitModule(FExtModuleOp op);
   void emitModulePorts(ArrayRef<PortInfo> ports,
-                       Block::BlockArgListType arguments = {});
+                       Block::BlockArgListType arguments);
 
   // Statement emission
   void emitStatementsInBlock(Block &block);
@@ -86,6 +86,7 @@ struct Emitter {
   void emitExpression(Value value);
   void emitExpression(ConstantOp op);
   void emitExpression(SpecialConstantOp op);
+  void emitExpression(StringConstantOp op);
   void emitExpression(SubfieldOp op);
   void emitExpression(SubindexOp op);
   void emitExpression(SubaccessOp op);
@@ -145,7 +146,7 @@ struct Emitter {
   void emitAttribute(RUWAttr attr);
 
   // Types
-  void emitType(Type type);
+  void emitType(Type type, bool includeConst = true);
 
   // Locations
   void emitLocation(Location loc);
@@ -255,9 +256,12 @@ void Emitter::emitModule(FExtModuleOp op) {
   indent() << "extmodule " << op.getName() << " :\n";
   addIndent();
 
+  Block *body = op.getBody().empty() ? nullptr : &op.getBody().front();
+
   // Emit the ports.
   auto ports = op.getPorts();
-  emitModulePorts(ports);
+  emitModulePorts(ports,
+                  body ? body->getArguments() : Block::BlockArgListType{});
 
   // Emit the optional `defname`.
   if (op.getDefname() && !op.getDefname()->empty())
@@ -287,6 +291,13 @@ void Emitter::emitModule(FExtModuleOp op) {
     os << "\n";
   }
 
+  // Emit the module body if present.
+  if (auto &region = op.getBody(); !region.empty()) {
+    emitStatementsInBlock(region.front());
+    valueNames.clear();
+    valueNamesStorage.clear();
+  }
+
   reduceIndent();
 }
 
@@ -295,11 +306,29 @@ void Emitter::emitModule(FExtModuleOp op) {
 /// during expression emission.
 void Emitter::emitModulePorts(ArrayRef<PortInfo> ports,
                               Block::BlockArgListType arguments) {
-  for (unsigned i = 0, e = ports.size(); i < e; ++i) {
-    const auto &port = ports[i];
+  unsigned argumentIndex = 0;
+  ModuleArgumentSSAPresence ssaPresence;
+  if (arguments.size() == ports.size())
+    ssaPresence = ModuleArgumentSSAPresence::All;
+  else if (arguments.empty())
+    ssaPresence = ModuleArgumentSSAPresence::None;
+  else
+    ssaPresence = ModuleArgumentSSAPresence::ConstOnly;
+
+  for (const auto &port : ports) {
     indent() << (port.direction == Direction::In ? "input " : "output ");
-    if (!arguments.empty())
-      addValueName(arguments[i], port.name);
+    switch (ssaPresence) {
+    case ModuleArgumentSSAPresence::None:
+      break;
+    case ModuleArgumentSSAPresence::ConstOnly:
+      if (!isConst(port.type))
+        break;
+      [[fallthrough]];
+    case ModuleArgumentSSAPresence::All:
+      addValueName(arguments[argumentIndex], port.name);
+      ++argumentIndex;
+      break;
+    }
     os << port.name.getValue() << " : ";
     emitType(port.type);
     os << "\n";
@@ -637,7 +666,8 @@ void Emitter::emitExpression(Value value) {
   TypeSwitch<Operation *>(op)
       .Case<
           // Basic expressions
-          ConstantOp, SpecialConstantOp, SubfieldOp, SubindexOp, SubaccessOp,
+          ConstantOp, SpecialConstantOp, StringConstantOp, SubfieldOp,
+          SubindexOp, SubaccessOp,
           // Binary
           AddPrimOp, SubPrimOp, MulPrimOp, DivPrimOp, RemPrimOp, AndPrimOp,
           OrPrimOp, XorPrimOp, LEQPrimOp, LTPrimOp, GEQPrimOp, GTPrimOp,
@@ -674,6 +704,13 @@ void Emitter::emitExpression(SpecialConstantOp op) {
         emitInner();
         os << ")";
       });
+}
+
+void Emitter::emitExpression(StringConstantOp op) {
+  emitType(op.getType());
+  os << "(\"";
+  os.write_escaped(op.getValue());
+  os << "\")";
 }
 
 void Emitter::emitExpression(SubfieldOp op) {
@@ -736,7 +773,10 @@ void Emitter::emitAttribute(RUWAttr attr) {
 }
 
 /// Emit a FIRRTL type into the output.
-void Emitter::emitType(Type type) {
+void Emitter::emitType(Type type, bool includeConst) {
+  if (includeConst && isConst(type))
+    os << "const ";
+
   auto emitWidth = [&](std::optional<int32_t> width) {
     if (width)
       os << "<" << *width << ">";
@@ -745,6 +785,7 @@ void Emitter::emitType(Type type) {
       .Case<ClockType>([&](auto) { os << "Clock"; })
       .Case<ResetType>([&](auto) { os << "Reset"; })
       .Case<AsyncResetType>([&](auto) { os << "AsyncReset"; })
+      .Case<StringType>([&](auto) { os << "String"; })
       .Case<UIntType>([&](auto type) {
         os << "UInt";
         emitWidth(type.getWidth());
@@ -765,7 +806,7 @@ void Emitter::emitType(Type type) {
           if (element.isFlip)
             os << "flip ";
           os << element.name.getValue() << " : ";
-          emitType(element.type);
+          emitType(element.type, false);
           anyEmitted = true;
         }
         if (anyEmitted)
@@ -773,11 +814,11 @@ void Emitter::emitType(Type type) {
         os << "}";
       })
       .Case<FVectorType>([&](auto type) {
-        emitType(type.getElementType());
+        emitType(type.getElementType(), false);
         os << "[" << type.getNumElements() << "]";
       })
       .Case<CMemoryType>([&](auto type) {
-        emitType(type.getElementType());
+        emitType(type.getElementType(), false);
         os << "[" << type.getNumElements() << "]";
       })
       .Default([&](auto type) {

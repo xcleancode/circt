@@ -30,9 +30,9 @@ public:
     return TypeSwitch<Operation *, ResultType>(op)
         // Basic Expressions
         .template Case<
-            ConstantOp, SpecialConstantOp, AggregateConstantOp, InvalidValueOp,
-            SubfieldOp, SubindexOp, SubaccessOp, BundleCreateOp, VectorCreateOp,
-            MultibitMuxOp,
+            ConstantOp, SpecialConstantOp, AggregateConstantOp,
+            StringConstantOp, InvalidValueOp, SubfieldOp, SubindexOp,
+            SubaccessOp, BundleCreateOp, VectorCreateOp, MultibitMuxOp,
             // Arithmetic and Logical Binary Primitives.
             AddPrimOp, SubPrimOp, MulPrimOp, DivPrimOp, RemPrimOp, AndPrimOp,
             OrPrimOp, XorPrimOp,
@@ -92,6 +92,7 @@ public:
   HANDLE(ConstantOp, Unhandled);
   HANDLE(SpecialConstantOp, Unhandled);
   HANDLE(AggregateConstantOp, Unhandled);
+  HANDLE(StringConstantOp, Unhandled);
   HANDLE(BundleCreateOp, Unhandled);
   HANDLE(VectorCreateOp, Unhandled);
   HANDLE(SubfieldOp, Unhandled);

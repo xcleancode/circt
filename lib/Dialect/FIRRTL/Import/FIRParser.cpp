@@ -1373,7 +1373,7 @@ ParseResult FIRStmtParser::parseExpImpl(Value &result, const Twine &message,
       return failure();
     break;
 
-  case FIRToken::string:
+  case FIRToken::kw_String:
     if (!isConst)
       return emitError("string literal expressions must be 'const'");
     if (parseStringLiteralExp(result))
@@ -1787,12 +1787,24 @@ ParseResult FIRStmtParser::parseIntegerLiteralExp(Value &result, bool isConst) {
   return success();
 }
 
-/// string-literal-exp ::= StringLit
+/// string-literal-exp ::= 'String' '(' StringLit ')'
 ParseResult FIRStmtParser::parseStringLiteralExp(Value &result) {
   locationProcessor.setLoc(getToken().getLoc());
+  consumeToken(FIRToken::kw_String);
+
+  if (parseToken(FIRToken::l_paren, "expected '(' in string expression"))
+    return failure();
+
+  if (getToken().getKind() != FIRToken::string)
+    return emitError("expected string literal");
+
   // Drop the double quotes and unescape.
   auto value = builder.getStringAttr(getToken().getStringValue());
   consumeToken(FIRToken::string);
+
+  if (parseToken(FIRToken::r_paren, "expected ')' in string expression"))
+    return failure();
+
   auto op = builder.create<StringConstantOp>(value);
   result = op.getResult();
   return success();
