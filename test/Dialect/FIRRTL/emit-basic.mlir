@@ -46,14 +46,14 @@ firrtl.circuit "Foo" {
   firrtl.module @Statements(in %ui1: !firrtl.uint<1>, in %someAddr: !firrtl.uint<8>, in %someClock: !firrtl.clock, in %someReset: !firrtl.reset, out %someOut: !firrtl.uint<1>) {
     // CHECK: when ui1 :
     // CHECK:   skip
-    firrtl.when %ui1 {
+    firrtl.when %ui1 : !firrtl.uint<1> {
       firrtl.skip
     }
     // CHECK: when ui1 :
     // CHECK:   skip
     // CHECK: else :
     // CHECK:   skip
-    firrtl.when %ui1 {
+    firrtl.when %ui1 : !firrtl.uint<1> {
       firrtl.skip
     } else {
       firrtl.skip
@@ -62,10 +62,10 @@ firrtl.circuit "Foo" {
     // CHECK:   skip
     // CHECK: else when ui1 :
     // CHECK:   skip
-    firrtl.when %ui1 {
+    firrtl.when %ui1 : !firrtl.uint<1> {
       firrtl.skip
     } else {
-      firrtl.when %ui1 {
+      firrtl.when %ui1 : !firrtl.uint<1> {
         firrtl.skip
       }
     }
@@ -281,7 +281,7 @@ firrtl.circuit "Foo" {
 
     %combmem = chirrtl.combmem : !chirrtl.cmemory<uint<3>, 256>
     %port0_data, %port0_port = chirrtl.memoryport Infer %combmem {name = "port0"} : (!chirrtl.cmemory<uint<3>, 256>) -> (!firrtl.uint<3>, !chirrtl.cmemoryport)
-    firrtl.when %ui1 {
+    firrtl.when %ui1 : !firrtl.uint<1> {
       chirrtl.memoryport.access %port0_port[%someAddr], %someClock : !chirrtl.cmemoryport, !firrtl.uint<8>, !firrtl.clock
     }
     // CHECK:      cmem combmem : UInt<3>[256]
@@ -290,7 +290,7 @@ firrtl.circuit "Foo" {
 
     %seqmem = chirrtl.seqmem Undefined : !chirrtl.cmemory<uint<3>, 256>
     %port1_data, %port1_port = chirrtl.memoryport Infer %seqmem {name = "port1"} : (!chirrtl.cmemory<uint<3>, 256>) -> (!firrtl.uint<3>, !chirrtl.cmemoryport)
-    firrtl.when %ui1 {
+    firrtl.when %ui1 : !firrtl.uint<1> {
       chirrtl.memoryport.access %port1_port[%someAddr], %someClock : !chirrtl.cmemoryport, !firrtl.uint<8>, !firrtl.clock
     }
     // CHECK:      smem seqmem : UInt<3>[256] undefined

@@ -217,14 +217,14 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
     ; CHECK: %c-85_si8 = firrtl.constant -85 : !firrtl.sint<8>
     sauto <= add(s8, SInt<8>(-85))
 
-    ; CHECK: firrtl.when %reset {
+    ; CHECK: firrtl.when %reset : !firrtl.uint<1> {
     ; CHECK:   firrtl.strictconnect %_t, %_t_2
     ; CHECK: } else {
     ; CHECK:   firrtl.strictconnect %_t, %_t_2
     ; CHECK: }
     when reset : _t <= _t_2 else : _t <- _t_2
 
-    ; CHECK: firrtl.when %reset {
+    ; CHECK: firrtl.when %reset : !firrtl.uint<1> {
     ; CHECK:   [[N4A:%.+]] = firrtl.node interesting_name %_t_2
     ; CHECK:   firrtl.strictconnect %_t, [[N4A]]
     ; CHECK: } else {
@@ -240,18 +240,18 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
 
     ; CHECK: [[TMP:%.+]] = firrtl.constant 4
     ; CHECK: [[COND:%.+]] = firrtl.lt %reset, [[TMP]]
-    ; CHECK: firrtl.when [[COND]] {
+    ; CHECK: firrtl.when [[COND]] : !firrtl.uint<1> {
     ; CHECK:   firrtl.strictconnect %_t, %_t_2
     ; CHECK: }
     ; CHECK-NOT: else
     when lt(reset, UInt(4)) :   ;; When with no else.
       _t <= _t_2
 
-    ; CHECK: firrtl.when %reset  {
+    ; CHECK: firrtl.when %reset : !firrtl.uint<1>  {
     ; CHECK:   firrtl.strictconnect %_t, %_t_2
     ; CHECK: } else  {
     ; CHECK:   [[COND:%.+]] = firrtl.not %reset
-    ; CHECK:   firrtl.when [[COND]]  {
+    ; CHECK:   firrtl.when [[COND]] : !firrtl.uint<1> {
     ; CHECK:     firrtl.strictconnect %_t, %_t_2
     ; CHECK:   }
     ; CHECK: }
@@ -260,11 +260,11 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
     else when not(reset) :
       _t <= _t_2
 
-    ; CHECK: firrtl.when %reset  {
+    ; CHECK: firrtl.when %reset : !firrtl.uint<1>  {
     ; CHECK:   firrtl.strictconnect %_t, %_t
     ; CHECK: } else  {
     ; CHECK:   [[COND:%.+]] = firrtl.not %reset
-    ; CHECK:   firrtl.when [[COND]]  {
+    ; CHECK:   firrtl.when [[COND]] : !firrtl.uint<1> {
     ; CHECK:     firrtl.strictconnect %_t, %_t_2
     ; CHECK:   } else  {
     ; CHECK:     firrtl.strictconnect %_t, %_t_2
@@ -344,7 +344,7 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
     myext.in <= i8
     printf(clock, reset, "Something interesting! %x", myext.out)
 
-    ; CHECK: firrtl.when %reset  {
+    ; CHECK: firrtl.when %reset : !firrtl.uint<1>  {
     when reset :
       ; CHECK: %reset_myext_in, %reset_myext_out = firrtl.instance reset_myext interesting_name @MyExtModule(in in: !firrtl.uint, out out: !firrtl.uint<8>)
       inst reset_myext of MyExtModule
@@ -505,13 +505,13 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
     smem memory : UInt<1>[9] [256]
 
     ; CHECK: %xyz0_data, %xyz0_port = chirrtl.memoryport Read %memory {name = "xyz0"} : (!chirrtl.cmemory<vector<uint<1>, 9>, 256>) -> (!firrtl.vector<uint<1>, 9>, !chirrtl.cmemoryport)
-    ; CHECK: firrtl.when %cond  {
+    ; CHECK: firrtl.when %cond : !firrtl.uint<1>  {
     ; CHECK:    chirrtl.memoryport.access %xyz0_port[%addr], %clock : !chirrtl.cmemoryport, !firrtl.uint, !firrtl.clock
     ; CHECK: }
     when cond :
       read mport xyz0 = memory[addr], clock
 
-    ; CHECK: firrtl.when %cond  {
+    ; CHECK: firrtl.when %cond : !firrtl.uint<1>  {
     ; CHECK:    %n0 = firrtl.node interesting_name %xyz0_data  : !firrtl.vector<uint<1>, 9>
     ; CHECK: }
     when cond :
@@ -533,13 +533,13 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
 
     ;; Constants always get emitted to the top level.
     ; CHECK: [[CST7:%.+]] = firrtl.constant 7 : !firrtl.uint<4>
-    ; CHECK: firrtl.when %cond {
+    ; CHECK: firrtl.when %cond : !firrtl.uint<1> {
     when cond :
       ; CHECK: %c = firrtl.node interesting_name [[CST15]]
       node c = UInt<4>(15)
       ; CHECK: %d = firrtl.node interesting_name [[CST7]]
       node d = UInt<4>(7)
-      ; CHECK: firrtl.when %cond {
+      ; CHECK: firrtl.when %cond : !firrtl.uint<1> {
       when cond :
         ; CHECK:  %e = firrtl.node interesting_name [[CST7]]
         node e = UInt<4>(7)
@@ -562,7 +562,7 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
     ; CHECK: %n3 = firrtl.node interesting_name [[SUB]]
     node n3 = i.x
 
-    ; CHECK: firrtl.when %cond {
+    ; CHECK: firrtl.when %cond : !firrtl.uint<1> {
     when cond:
       ; CHECK: %n4 = firrtl.node interesting_name [[SUB]]
       node n4 = i.x
@@ -583,7 +583,7 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
     ; CHECK: %0 = firrtl.subfield %bf[int_1]
     ; CHECK: %_T = firrtl.node interesting_name %0
     node _T = bf.int_1
-    ; CHECK: firrtl.when %_T {
+    ; CHECK: firrtl.when %_T : !firrtl.uint<1> {
     when _T :
       skip
 
@@ -1070,7 +1070,7 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
       node not_cond2 = eq(cond, UInt<1>(0))
       when not_cond2:
         printf(clock, enable, "Assertion failed: hello outside reset")
-    ; CHECK: firrtl.when %not_reset {
+    ; CHECK: firrtl.when %not_reset : !firrtl.uint<1> {
     ; CHECK-NOT: firrtl.assert %clock, %cond, %enable, "hello outside reset"
     ; CHECK: [[TMP:%.+]] = firrtl.not %not_cond2
     ; CHECK-NEXT: firrtl.assert %clock, [[TMP]], %enable, "Assertion failed: hello outside reset"

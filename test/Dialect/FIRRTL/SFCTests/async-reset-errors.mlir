@@ -99,7 +99,7 @@ firrtl.circuit "Foo"   {
     %w = firrtl.wire  : !firrtl.uint<1>
     %c1_ui = firrtl.constant 1 : !firrtl.uint
     firrtl.connect %w, %c1_ui : !firrtl.uint<1>, !firrtl.uint
-    firrtl.when %cond  {
+    firrtl.when %cond : !firrtl.uint<1> {
       firrtl.connect %w, %y : !firrtl.uint<1>, !firrtl.uint<1>
     }
     // expected-error @+2 {{register with async reset requires constant reset value}}

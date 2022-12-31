@@ -71,7 +71,7 @@ def StrictConnectOp : FIRRTLOp<"strictconnect", [SameTypeOperands, FConnectLike]
 def PrintFOp : FIRRTLOp<"printf"> {
   let summary = "Formatted Print Statement";
 
-  let arguments = (ins ClockType:$clock, UInt1Type:$cond, StrAttr:$formatString,
+  let arguments = (ins ClockType:$clock, NonConstUInt1Type:$cond, StrAttr:$formatString,
                        Variadic<FIRRTLBaseType>:$substitutions, StrAttr:$name);
   let results = (outs);
 
@@ -101,7 +101,7 @@ def SkipOp : FIRRTLOp<"skip", [Pure]> {
 def StopOp : FIRRTLOp<"stop"> {
   let summary = "Stop Statement";
 
-  let arguments = (ins ClockType:$clock, UInt1Type:$cond, I32Attr:$exitCode,
+  let arguments = (ins ClockType:$clock, NonConstUInt1Type:$cond, I32Attr:$exitCode,
                        StrAttr:$name);
   let results = (outs);
 
@@ -122,8 +122,8 @@ class VerifOp<string mnemonic, list<Trait> traits = []> :
     FIRRTLOp<mnemonic, traits> {
   let arguments = (ins
     ClockType:$clock,
-    UInt1Type:$predicate,
-    UInt1Type:$enable,
+    NonConstUInt1Type:$predicate,
+    NonConstUInt1Type:$enable,
     StrAttr:$message,
     Variadic<AnyType>:$substitutions,
     StrAttr:$name,
@@ -173,7 +173,7 @@ def WhenOp : FIRRTLOp<"when", [SingleBlock, NoTerminator, NoRegionArguments,
   ];
 
   let assemblyFormat =
-    "$condition $thenRegion (`else` $elseRegion^)? attr-dict-with-keyword";
+    "$condition `:` type($condition) $thenRegion (`else` $elseRegion^)? attr-dict-with-keyword";
 
   let extraClassDeclaration = [{
 

@@ -27,7 +27,7 @@ firrtl.circuit "Mem" attributes {annotations = [{class = "sifive.enterprise.firr
     // CHECK:           %[[v23:.+]] = firrtl.subaccess %mem[%[[v4:.+]]]
     // CHECK:           %invalid_ui8 = firrtl.invalidvalue : !firrtl.uint<8>
     // CHECK:           firrtl.strictconnect %[[v3]], %invalid_ui8 : !firrtl.uint<8>
-    // CHECK:           firrtl.when %[[v1]] {
+    // CHECK:           firrtl.when %[[v1]] : !firrtl.uint<1> {
     // CHECK:             firrtl.strictconnect %[[v3]], %[[v23]]
     // CHECK:           }
     // CHECK:           %mem_write = firrtl.wire  : !firrtl.bundle<addr: uint<3>, en: uint<1>, clk: clock, data: uint<8>, mask: uint<1>>
@@ -37,8 +37,8 @@ firrtl.circuit "Mem" attributes {annotations = [{class = "sifive.enterprise.firr
     // CHECK:           %[[v8:.+]] = firrtl.subfield %mem_write[data]
     // CHECK:           %[[v9:.+]] = firrtl.subfield %mem_write[mask]
     // CHECK:           %[[v10:.+]] = firrtl.subaccess %mem[%[[v5]]]
-    // CHECK:           firrtl.when %[[v6]] {
-    // CHECK:             firrtl.when %[[v9]] {
+    // CHECK:           firrtl.when %[[v6]] : !firrtl.uint<1> {
+    // CHECK:             firrtl.when %[[v9]] : !firrtl.uint<1> {
     // CHECK:               firrtl.strictconnect %[[v10]], %[[v8]] : !firrtl.uint<8>
     // CHECK:             }
     // CHECK:           }
@@ -184,11 +184,11 @@ firrtl.circuit "WriteMask" attributes {annotations = [
     // CHECK:         %[[v14:.+]] = firrtl.subindex
     // CHECK:         %[[v15:.+]] = firrtl.subindex
     // CHECK:         %[[v16:.+]] = firrtl.subindex
-    // CHECK:         firrtl.when %[[v6]] {
-    // CHECK:           firrtl.when %[[v13]] {
+    // CHECK:         firrtl.when %[[v6]] : !firrtl.uint<1> {
+    // CHECK:           firrtl.when %[[v13]] : !firrtl.uint<1> {
     // CHECK:             firrtl.strictconnect %[[v11]], %[[v12]] : !firrtl.uint<8>
     // CHECK:           }
-    // CHECK:           firrtl.when %[[v16]] {
+    // CHECK:           firrtl.when %[[v16]] : !firrtl.uint<1> {
     // CHECK:             firrtl.strictconnect %[[v14]], %[[v15]] : !firrtl.uint<8>
     // CHECK:           }
     %mem_read1, %mem_write1 = firrtl.mem Undefined {

@@ -273,7 +273,7 @@ firrtl.module @declarations(in %clock : !firrtl.clock, in %u8 : !firrtl.uint<8>,
   %smem = chirrtl.seqmem Undefined : !chirrtl.cmemory<uint<8>, 8>
   // CHECK: %myinst_wire = firrtl.wire  : !firrtl.uint<1>
   %wire = firrtl.wire : !firrtl.uint<1>
-  firrtl.when %wire {
+  firrtl.when %wire : !firrtl.uint<1> {
     // CHECK:  %myinst_inwhen = firrtl.wire  : !firrtl.uint<1>
     %inwhen = firrtl.wire : !firrtl.uint<1>
   }

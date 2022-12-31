@@ -14,7 +14,7 @@ firrtl.circuit "TopLevel" {
   firrtl.module private @Simple(in %source: !firrtl.bundle<valid: uint<1>, ready flip: uint<1>, data: uint<64>>,
                         out %sink: !firrtl.bundle<valid: uint<1>, ready flip: uint<1>, data: uint<64>>) {
 
-    // COMMON-NEXT: firrtl.when %[[SOURCE_VALID_NAME]]
+    // COMMON-NEXT: firrtl.when %[[SOURCE_VALID_NAME]] : !firrtl.uint<1>
     // COMMON-NEXT:   firrtl.connect %[[SINK_DATA_NAME]], %[[SOURCE_DATA_NAME]] : [[SINK_DATA_TYPE]], [[SOURCE_DATA_TYPE]]
     // COMMON-NEXT:   firrtl.connect %[[SINK_VALID_NAME]], %[[SOURCE_VALID_NAME]] : [[SINK_VALID_TYPE]], [[SOURCE_VALID_TYPE]]
     // COMMON-NEXT:   firrtl.connect %[[SOURCE_READY_NAME]], %[[SINK_READY_NAME]] : [[SOURCE_READY_TYPE]], [[SINK_READY_TYPE]]
@@ -25,7 +25,7 @@ firrtl.circuit "TopLevel" {
     %3 = firrtl.subfield %sink[valid] : !firrtl.bundle<valid: uint<1>, ready flip: uint<1>, data: uint<64>>
     %4 = firrtl.subfield %sink[ready] : !firrtl.bundle<valid: uint<1>, ready flip: uint<1>, data: uint<64>>
     %5 = firrtl.subfield %sink[data] : !firrtl.bundle<valid: uint<1>, ready flip: uint<1>, data: uint<64>>
-    firrtl.when %0 {
+    firrtl.when %0 : !firrtl.uint<1> {
       firrtl.connect %5, %2 : !firrtl.uint<64>, !firrtl.uint<64>
       firrtl.connect %3, %0 : !firrtl.uint<1>, !firrtl.uint<1>
       firrtl.connect %1, %4 : !firrtl.uint<1>, !firrtl.uint<1>
@@ -552,14 +552,14 @@ firrtl.circuit "TopLevel" {
                          in %in : !firrtl.bundle<a: uint<1>, b: uint<1>>,
                          out %out : !firrtl.bundle<a: uint<1>, b: uint<1>>) {
     // No else region.
-    firrtl.when %p {
+    firrtl.when %p : !firrtl.uint<1> {
       // CHECK: firrtl.strictconnect %out_a, %in_a : !firrtl.uint<1>
       // CHECK: firrtl.strictconnect %out_b, %in_b : !firrtl.uint<1>
       firrtl.connect %out, %in : !firrtl.bundle<a: uint<1>, b: uint<1>>, !firrtl.bundle<a: uint<1>, b: uint<1>>
     }
 
     // Else region.
-    firrtl.when %p {
+    firrtl.when %p : !firrtl.uint<1> {
       // CHECK: firrtl.strictconnect %out_a, %in_a : !firrtl.uint<1>
       // CHECK: firrtl.strictconnect %out_b, %in_b : !firrtl.uint<1>
       firrtl.connect %out, %in : !firrtl.bundle<a: uint<1>, b: uint<1>>, !firrtl.bundle<a: uint<1>, b: uint<1>>
@@ -800,12 +800,12 @@ firrtl.circuit "TopLevel" {
 // CHECK-NEXT:      firrtl.strictconnect %a_1, %default_1 : !firrtl.uint<1>
 // CHECK-NEXT:      %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
 // CHECK-NEXT:      %0 = firrtl.eq %sel, %c0_ui1 : (!firrtl.uint<2>, !firrtl.uint<1>) -> !firrtl.uint<1>
-// CHECK-NEXT:      firrtl.when %0  {
+// CHECK-NEXT:      firrtl.when %0 : !firrtl.uint<1>  {
 // CHECK-NEXT:        firrtl.strictconnect %a_0, %b : !firrtl.uint<1>
 // CHECK-NEXT:      }
 // CHECK-NEXT:      %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
 // CHECK-NEXT:      %1 = firrtl.eq %sel, %c1_ui1 : (!firrtl.uint<2>, !firrtl.uint<1>) -> !firrtl.uint<1>
-// CHECK-NEXT:      firrtl.when %1  {
+// CHECK-NEXT:      firrtl.when %1 : !firrtl.uint<1>  {
 // CHECK-NEXT:        firrtl.strictconnect %a_1, %b : !firrtl.uint<1>
 // CHECK-NEXT:      }
 // CHECK-NEXT:    }
@@ -827,29 +827,29 @@ firrtl.circuit "TopLevel" {
 // CHECK-LABEL:    firrtl.module private @multidimWrite(in %sel: !firrtl.uint<1>, in %b: !firrtl.uint<2>, out %a_0_0: !firrtl.uint<2>, out %a_0_1: !firrtl.uint<2>, out %a_1_0: !firrtl.uint<2>, out %a_1_1: !firrtl.uint<2>) {
 // CHECK-NEXT:      %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
 // CHECK-NEXT:      %0 = firrtl.eq %sel, %c0_ui1 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
-// CHECK-NEXT:      firrtl.when %0  {
+// CHECK-NEXT:      firrtl.when %0 : !firrtl.uint<1>  {
 // CHECK-NEXT:        %c0_ui1_0 = firrtl.constant 0 : !firrtl.uint<1>
 // CHECK-NEXT:        %2 = firrtl.eq %sel, %c0_ui1_0 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
-// CHECK-NEXT:        firrtl.when %2  {
+// CHECK-NEXT:        firrtl.when %2 : !firrtl.uint<1>  {
 // CHECK-NEXT:          firrtl.strictconnect %a_0_0, %b : !firrtl.uint<2>
 // CHECK-NEXT:        }
 // CHECK-NEXT:        %c1_ui1_1 = firrtl.constant 1 : !firrtl.uint<1>
 // CHECK-NEXT:        %3 = firrtl.eq %sel, %c1_ui1_1 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
-// CHECK-NEXT:        firrtl.when %3  {
+// CHECK-NEXT:        firrtl.when %3 : !firrtl.uint<1>  {
 // CHECK-NEXT:          firrtl.strictconnect %a_0_1, %b : !firrtl.uint<2>
 // CHECK-NEXT:        }
 // CHECK-NEXT:      }
 // CHECK-NEXT:      %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
 // CHECK-NEXT:      %1 = firrtl.eq %sel, %c1_ui1 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
-// CHECK-NEXT:      firrtl.when %1  {
+// CHECK-NEXT:      firrtl.when %1 : !firrtl.uint<1>  {
 // CHECK-NEXT:        %c0_ui1_0 = firrtl.constant 0 : !firrtl.uint<1>
 // CHECK-NEXT:        %2 = firrtl.eq %sel, %c0_ui1_0 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
-// CHECK-NEXT:        firrtl.when %2  {
+// CHECK-NEXT:        firrtl.when %2 : !firrtl.uint<1>  {
 // CHECK-NEXT:          firrtl.strictconnect %a_1_0, %b : !firrtl.uint<2>
 // CHECK-NEXT:        }
 // CHECK-NEXT:        %c1_ui1_1 = firrtl.constant 1 : !firrtl.uint<1>
 // CHECK-NEXT:        %3 = firrtl.eq %sel, %c1_ui1_1 : (!firrtl.uint<1>, !firrtl.uint<1>) -> !firrtl.uint<1>
-// CHECK-NEXT:        firrtl.when %3  {
+// CHECK-NEXT:        firrtl.when %3 : !firrtl.uint<1>  {
 // CHECK-NEXT:          firrtl.strictconnect %a_1_1, %b : !firrtl.uint<2>
 // CHECK-NEXT:        }
 // CHECK-NEXT:      }
@@ -879,12 +879,12 @@ firrtl.circuit "TopLevel" {
 // CHECK-NEXT:      firrtl.strictconnect %b_1_valid, %def_1_valid : !firrtl.uint<2>
 // CHECK-NEXT:      %c0_ui1 = firrtl.constant 0 : !firrtl.uint<1>
 // CHECK-NEXT:      %0 = firrtl.eq %sel, %c0_ui1 : (!firrtl.uint<2>, !firrtl.uint<1>) -> !firrtl.uint<1>
-// CHECK-NEXT:      firrtl.when %0  {
+// CHECK-NEXT:      firrtl.when %0 : !firrtl.uint<1>  {
 // CHECK-NEXT:        firrtl.strictconnect %b_0_wo, %a_wo : !firrtl.uint<1>
 // CHECK-NEXT:      }
 // CHECK-NEXT:      %c1_ui1 = firrtl.constant 1 : !firrtl.uint<1>
 // CHECK-NEXT:      %1 = firrtl.eq %sel, %c1_ui1 : (!firrtl.uint<2>, !firrtl.uint<1>) -> !firrtl.uint<1>
-// CHECK-NEXT:      firrtl.when %1  {
+// CHECK-NEXT:      firrtl.when %1 : !firrtl.uint<1>  {
 // CHECK-NEXT:        firrtl.strictconnect %b_1_wo, %a_wo : !firrtl.uint<1>
 // CHECK-NEXT:      }
 // CHECK-NEXT:    }

@@ -416,7 +416,7 @@ firrtl.circuit "Foo" {
     firrtl.printf %clk, %false, "foo"
     firrtl.skip
     firrtl.stop %clk, %false, 0
-    firrtl.when %a  {
+    firrtl.when %a : !firrtl.uint<1>  {
       firrtl.connect %ui, %c0_ui4 : !firrtl.uint, !firrtl.uint<4>
     } else  {
       firrtl.connect %ui, %c0_ui5 : !firrtl.uint, !firrtl.uint<5>

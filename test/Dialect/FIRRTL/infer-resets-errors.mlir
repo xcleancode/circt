@@ -41,7 +41,7 @@ firrtl.circuit "top" {
     // expected-note @+1 {{sync drive here:}}
     firrtl.connect %w2, %reset2 : !firrtl.reset, !firrtl.uint<1>
     firrtl.connect %out, %w2 : !firrtl.reset, !firrtl.reset
-    firrtl.when %en  {
+    firrtl.when %en : !firrtl.uint<1>  {
       firrtl.connect %out, %w0 : !firrtl.reset, !firrtl.reset
     } else  {
       firrtl.connect %out, %w1 : !firrtl.reset, !firrtl.reset
@@ -61,7 +61,7 @@ firrtl.circuit "top" {
     // expected-note @+1 {{sync drive here:}}
     firrtl.connect %w2, %reset1 : !firrtl.reset, !firrtl.uint<1>
     firrtl.connect %out, %w1 : !firrtl.reset, !firrtl.reset
-    firrtl.when %en  {
+    firrtl.when %en : !firrtl.uint<1>  {
       firrtl.connect %out, %w2 : !firrtl.reset, !firrtl.reset
     }
   }
