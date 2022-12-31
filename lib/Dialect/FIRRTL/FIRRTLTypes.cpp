@@ -500,7 +500,7 @@ bool FIRRTLBaseType::isResetType() {
 unsigned FIRRTLBaseType::getMaxFieldID() {
   return TypeSwitch<FIRRTLBaseType, int32_t>(*this)
       .Case<AnalogType, ClockType, ResetType, AsyncResetType, SIntType,
-            UIntType>([](Type) { return 0; })
+            UIntType, StringType>([](Type) { return 0; })
       .Case<BundleType, FVectorType>(
           [](auto type) { return type.getMaxFieldID(); })
       .Default([](Type) {
@@ -513,7 +513,7 @@ std::pair<FIRRTLBaseType, unsigned>
 FIRRTLBaseType::getSubTypeByFieldID(unsigned fieldID) {
   return TypeSwitch<FIRRTLBaseType, std::pair<FIRRTLBaseType, unsigned>>(*this)
       .Case<AnalogType, ClockType, ResetType, AsyncResetType, SIntType,
-            UIntType>([&](FIRRTLBaseType t) {
+            UIntType, StringType>([&](FIRRTLBaseType t) {
         assert(!fieldID && "non-aggregate types must have a field id of 0");
         return std::pair(t, 0);
       })
@@ -536,7 +536,8 @@ std::pair<unsigned, bool> FIRRTLBaseType::rootChildFieldID(unsigned fieldID,
                                                            unsigned index) {
   return TypeSwitch<FIRRTLBaseType, std::pair<unsigned, bool>>(*this)
       .Case<AnalogType, ClockType, ResetType, AsyncResetType, SIntType,
-            UIntType>([&](Type) { return std::make_pair(0, fieldID == 0); })
+            UIntType, StringType>(
+          [&](Type) { return std::make_pair(0, fieldID == 0); })
       .Case<BundleType, FVectorType>(
           [&](auto type) { return type.rootChildFieldID(fieldID, index); })
       .Default([](Type) {
