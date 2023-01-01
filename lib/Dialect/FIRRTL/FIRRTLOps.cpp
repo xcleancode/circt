@@ -154,9 +154,10 @@ Flow firrtl::foldFlow(Value val, Flow accumulatedFlow) {
   };
 
   if (auto blockArg = val.dyn_cast<BlockArgument>()) {
-    auto op = val.getParentBlock()->getParentOp();
-    auto direction =
-        cast<FModuleLike>(op).getPortDirection(blockArg.getArgNumber());
+    auto *op = val.getParentBlock()->getParentOp();
+    auto module = cast<FModuleLike>(op);
+    auto direction = module.getPortDirection(
+        module.getArgumentPortIndex(blockArg.getArgNumber()));
     if (direction == Direction::Out)
       return swap();
     return accumulatedFlow;
@@ -700,15 +701,19 @@ void FExtModuleOp::build(OpBuilder &builder, OperationState &result,
   Block *body = nullptr;
 
   // Add 'const' arguments to the body block.
-  for (auto port : ports) {
+  SmallVector<int32_t> argumentPortIndices;
+  for (auto [portIndex, port] : llvm::enumerate(ports)) {
     if (isConst(port.type)) {
       if (!body) {
         body = new Block();
         bodyRegion->push_back(body);
       }
       body->addArgument(port.type, port.loc);
+      argumentPortIndices.push_back(portIndex);
     }
   }
+  result.addAttribute("argumentPortIndices",
+                      builder.getI32ArrayAttr(argumentPortIndices));
 }
 
 void FMemModuleOp::build(OpBuilder &builder, OperationState &result,
@@ -954,8 +959,8 @@ static void printFModuleLikeOp(OpAsmPrinter &p, FModuleLike op) {
       op.getPortAnnotations(), op.getPortSymbols(), op.ssaPresence());
 
   SmallVector<StringRef, 4> omittedAttrs = {
-      "sym_name", "portDirections", "portTypes",       "portAnnotations",
-      "portSyms", "parameters",     visibilityAttrName};
+      "sym_name", "portDirections", "portTypes",           "portAnnotations",
+      "portSyms", "parameters",     "argumentPortIndices", visibilityAttrName};
 
   // We can omit the portNames if they were able to be printed as properly as
   // block arguments.
@@ -1111,6 +1116,19 @@ static ParseResult parseFModuleLikeOp(OpAsmParser &parser,
     if (body->empty())
       body->push_back(new Block());
   }
+
+  // Add argument port indices if needed
+  if (ssaPresence == ModuleArgumentSSAPresence::ConstOnly &&
+      !result.attributes.get("argumentPortIndices")) {
+    SmallVector<int32_t> argumentPortIndices;
+    for (auto [portIndex, portType] : llvm::enumerate(portTypes)) {
+      if (isConst(portType.cast<TypeAttr>().getValue()))
+        argumentPortIndices.push_back(portIndex);
+    }
+    result.addAttribute("argumentPortIndices",
+                        builder.getI32ArrayAttr(argumentPortIndices));
+  }
+
   return success();
 }
 
@@ -2882,6 +2900,7 @@ FIRRTLType impl::inferComparisonResult(FIRRTLType lhs, FIRRTLType rhs,
 FIRRTLType CatPrimOp::inferBinaryReturnType(FIRRTLType lhs, FIRRTLType rhs,
                                             std::optional<Location> loc) {
   int32_t lhsWidth, rhsWidth, resultWidth = -1;
+  llvm::errs() << lhs << ", " << rhs << '\n';
   if (!isSameIntTypeKind(lhs, rhs, lhsWidth, rhsWidth, loc))
     return {};
 

@@ -233,7 +233,14 @@ def FModuleLike : OpInterface<"FModuleLike"> {
     //===------------------------------------------------------------------===//
 
     InterfaceMethod<"Get the module argument ssa presence",
-    "ModuleArgumentSSAPresence", "ssaPresence">
+    "ModuleArgumentSSAPresence", "ssaPresence">,
+
+    InterfaceMethod<"Get a module argument's port index",
+    "size_t", "getArgumentPortIndex",
+    (ins "size_t":$argumentIndex), [{}],
+    /*defaultImplementation=*/[{
+      return argumentIndex;
+    }]>
   ];
 
   let extraClassDeclaration = [{
@@ -278,6 +285,10 @@ def FModuleLike : OpInterface<"FModuleLike"> {
       for (auto &sym : syms)
         if (!sym)
           sym = empty;
+    }
+
+    size_t getNumPorts() {
+      return getPortTypesAttr().size();
     }
   }];
 

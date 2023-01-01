@@ -149,7 +149,8 @@ def FExtModuleOp : FIRRTLModuleLike<"extmodule", [NoTerminator]> {
                    ParamDeclArrayAttr:$parameters,
                    DefaultValuedAttr<AnnotationArrayAttr,
                    "ArrayAttr()">:$annotations,
-                   DefaultValuedAttr<ArrayAttr, "{}">:$internalPaths
+                   DefaultValuedAttr<ArrayAttr, "{}">:$internalPaths,
+                   I32ArrayAttr:$argumentPortIndices
                   );
   let results = (outs);
   let regions = (region AnyRegion:$body);
@@ -166,6 +167,15 @@ def FExtModuleOp : FIRRTLModuleLike<"extmodule", [NoTerminator]> {
   let extraClassDeclaration = [{
     void getAsmBlockArgumentNames(mlir::Region &region,
                                   mlir::OpAsmSetValueNameFn setNameFn);
+
+    Block *getOptionalBodyBlock() {
+      auto &body = getBody();
+      return body.empty() ? nullptr : &body.front();
+    }
+
+    size_t getArgumentPortIndex(size_t argumentIndex) {
+      return getArgumentPortIndices()[argumentIndex].cast<IntegerAttr>().getInt();
+    }
   }];
 
   let hasCustomAssemblyFormat = 1;

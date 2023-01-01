@@ -336,13 +336,14 @@ struct AttrCache {
     sPortTypes = StringAttr::get(context, "portTypes");
     sPortSyms = StringAttr::get(context, "portSyms");
     sPortAnnotations = StringAttr::get(context, "portAnnotations");
+    sArgumentPortIndices = StringAttr::get(context, "argumentPortIndices");
     sEmpty = StringAttr::get(context, "");
   }
   AttrCache(const AttrCache &) = default;
 
   Type i64ty;
   StringAttr innerSymAttr, nameAttr, nameKindAttr, sPortDirections, sPortNames,
-      sPortTypes, sPortSyms, sPortAnnotations, sEmpty;
+      sPortTypes, sPortSyms, sPortAnnotations, sArgumentPortIndices, sEmpty;
 };
 
 // The visitors all return true if the operation should be deleted, false if
@@ -365,7 +366,7 @@ struct TypeLoweringVisitor : public FIRRTLVisitor<TypeLoweringVisitor, bool> {
   void lowerModule(FModuleLike op);
 
   bool lowerArg(FModuleLike module, size_t argIndex, size_t argsRemoved,
-                SmallVectorImpl<PortInfo> &newArgs,
+                size_t blockArgIndex, SmallVectorImpl<PortInfo> &newArgs,
                 SmallVectorImpl<Value> &lowering);
   std::pair<Value, PortInfo> addArg(Operation *module, unsigned insertPt,
                                     unsigned insertPtOffset, FIRRTLType srcType,
@@ -693,6 +694,10 @@ TypeLoweringVisitor::addArg(Operation *module, unsigned insertPt,
     Block *body = mod.getBodyBlock();
     // Append the new argument.
     newValue = body->insertArgument(insertPt, fieldType, oldArg.loc);
+  } else if (auto extMod = dyn_cast<FExtModuleOp>(module)) {
+    if (auto *body = extMod.getOptionalBodyBlock())
+      // Append the new argument.
+      newValue = body->insertArgument(insertPt, fieldType, oldArg.loc);
   }
 
   // Save the name attribute for the new argument.
@@ -721,7 +726,7 @@ TypeLoweringVisitor::addArg(Operation *module, unsigned insertPt,
 
 // Lower arguments with bundle type by flattening them.
 bool TypeLoweringVisitor::lowerArg(FModuleLike module, size_t argIndex,
-                                   size_t argsRemoved,
+                                   size_t bodyArgIndex, size_t argsRemoved,
                                    SmallVectorImpl<PortInfo> &newArgs,
                                    SmallVectorImpl<Value> &lowering) {
 
@@ -732,8 +737,9 @@ bool TypeLoweringVisitor::lowerArg(FModuleLike module, size_t argIndex,
     return false;
 
   for (const auto &field : llvm::enumerate(fieldTypes)) {
-    auto newValue = addArg(module, 1 + argIndex + field.index(), argsRemoved,
-                           srcType, field.value(), newArgs[argIndex]);
+    auto newValue =
+        addArg(module, 1 + bodyArgIndex + field.index(), argsRemoved, srcType,
+               field.value(), newArgs[argIndex]);
     newArgs.insert(newArgs.begin() + 1 + argIndex + field.index(),
                    newValue.second);
     // Lower any other arguments by copying them to keep the relative order.
@@ -914,29 +920,52 @@ bool TypeLoweringVisitor::visitDecl(MemOp op) {
 }
 
 bool TypeLoweringVisitor::visitDecl(FExtModuleOp extModule) {
+  auto *body = extModule.getOptionalBodyBlock();
+
   ImplicitLocOpBuilder theBuilder(extModule.getLoc(), context);
   builder = &theBuilder;
 
   // Top level builder
   OpBuilder builder(context);
 
+  // Lower the operations.
+  if (body)
+    lowerBlock(body);
+
   // Lower the module block arguments.
-  SmallVector<unsigned> argsToRemove;
+  llvm::BitVector argsToRemove;
+  llvm::BitVector bodyArgsToRemove;
   auto newArgs = extModule.getPorts();
+  size_t bodyArgIndex = 0;
   for (size_t argIndex = 0, argsRemoved = 0; argIndex < newArgs.size();
        ++argIndex) {
-    SmallVector<Value> lowering;
-    if (lowerArg(extModule, argIndex, argsRemoved, newArgs, lowering)) {
-      argsToRemove.push_back(argIndex);
+    SmallVector<Value> lowerings;
+    if (lowerArg(extModule, argIndex, bodyArgIndex, argsRemoved, newArgs,
+                 lowerings)) {
+      if (body && isConst(newArgs[argIndex].type)) {
+        auto arg = body->getArgument(bodyArgIndex);
+        processUsers(arg, lowerings);
+        bodyArgsToRemove.push_back(true);
+        ++bodyArgIndex;
+      }
+      argsToRemove.push_back(true);
       ++argsRemoved;
+    } else {
+      if (body && isConst(newArgs[argIndex].type)) {
+        bodyArgsToRemove.push_back(false);
+        ++bodyArgIndex;
+      }
+      argsToRemove.push_back(false);
     }
     // lowerArg might have invalidated any reference to newArgs, be careful
   }
 
-  // Remove block args that have been lowered
-  for (auto ii = argsToRemove.rbegin(), ee = argsToRemove.rend(); ii != ee;
-       ++ii)
-    newArgs.erase(newArgs.begin() + *ii);
+  // Remove block args that have been lowered.
+  if (body)
+    body->eraseArguments(bodyArgsToRemove);
+  for (auto deadArg = argsToRemove.find_last(); deadArg != -1;
+       deadArg = argsToRemove.find_prev(deadArg))
+    newArgs.erase(newArgs.begin() + deadArg);
 
   SmallVector<NamedAttribute, 8> newModuleAttrs;
 
@@ -946,7 +975,7 @@ bool TypeLoweringVisitor::visitDecl(FExtModuleOp extModule) {
     // handled differently below.
     if (attr.getName() != "portDirections" && attr.getName() != "portNames" &&
         attr.getName() != "portTypes" && attr.getName() != "portAnnotations" &&
-        attr.getName() != "portSyms")
+        attr.getName() != "portSyms" && attr.getName() != "argumentPortIndices")
       newModuleAttrs.push_back(attr);
 
   SmallVector<Direction> newArgDirections;
@@ -954,13 +983,16 @@ bool TypeLoweringVisitor::visitDecl(FExtModuleOp extModule) {
   SmallVector<Attribute, 8> newPortTypes;
   SmallVector<Attribute, 8> newArgSyms;
   SmallVector<Attribute, 8> newArgAnnotations;
+  SmallVector<int32_t> newArgPortIndices;
 
-  for (auto &port : newArgs) {
+  for (auto [portIndex, port] : llvm::enumerate(newArgs)) {
     newArgDirections.push_back(port.direction);
     newArgNames.push_back(port.name);
     newPortTypes.push_back(TypeAttr::get(port.type));
     newArgSyms.push_back(port.sym);
     newArgAnnotations.push_back(port.annotations.getArrayAttr());
+    if (isConst(port.type))
+      newArgPortIndices.push_back(portIndex);
   }
 
   newModuleAttrs.push_back(
@@ -975,6 +1007,9 @@ bool TypeLoweringVisitor::visitDecl(FExtModuleOp extModule) {
 
   newModuleAttrs.push_back(NamedAttribute(
       cache.sPortAnnotations, builder.getArrayAttr(newArgAnnotations)));
+
+  newModuleAttrs.push_back(NamedAttribute(
+      cache.sArgumentPortIndices, builder.getI32ArrayAttr(newArgPortIndices)));
 
   // Update the module's attributes.
   extModule->setAttrs(newModuleAttrs);
@@ -997,7 +1032,7 @@ bool TypeLoweringVisitor::visitDecl(FModuleOp module) {
   for (size_t argIndex = 0, argsRemoved = 0; argIndex < newArgs.size();
        ++argIndex) {
     SmallVector<Value> lowerings;
-    if (lowerArg(module, argIndex, argsRemoved, newArgs, lowerings)) {
+    if (lowerArg(module, argIndex, argIndex, argsRemoved, newArgs, lowerings)) {
       auto arg = module.getArgument(argIndex);
       processUsers(arg, lowerings);
       argsToRemove.push_back(true);

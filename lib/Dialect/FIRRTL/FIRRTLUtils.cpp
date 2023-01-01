@@ -464,9 +464,9 @@ static void getDeclName(Value value, SmallString<64> &string, bool nameSafe) {
   while (value) {
     if (auto arg = value.dyn_cast<BlockArgument>()) {
       // Get the module ports and get the name.
-      auto module = cast<FModuleOp>(arg.getOwner()->getParentOp());
-      SmallVector<PortInfo> ports = module.getPorts();
-      string += ports[arg.getArgNumber()].name.getValue();
+      auto module = cast<FModuleLike>(arg.getOwner()->getParentOp());
+      size_t portIndex = module.getArgumentPortIndex(arg.getArgNumber());
+      string += module.getPortName(portIndex);
       return;
     }
 

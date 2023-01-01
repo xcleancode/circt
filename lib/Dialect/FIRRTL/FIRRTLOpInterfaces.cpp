@@ -101,27 +101,19 @@ LogicalResult circt::firrtl::verifyModuleLikeOpInterface(FModuleLike module) {
                << numPorts << " arguments to match module signature";
     }
 
-    size_t argumentIndex = 0;
-    for (auto [portIndex, portTypeAttr] :
-         llvm::enumerate(portTypes.getValue())) {
-      auto portType = portTypeAttr.cast<TypeAttr>().getValue();
+    for (auto argument : block.getArguments()) {
+      size_t portIndex = module.getArgumentPortIndex(argument.getArgNumber());
+      auto blockType = argument.getType();
       if (ssaPresence == ModuleArgumentSSAPresence::ConstOnly &&
-          !isConst(portType))
-        continue;
-
-      auto blockType = block.getArgument(argumentIndex).getType();
-      argumentIndex++;
-
+          !isConst(blockType))
+        return module.emitOpError(
+            "only 'const' block argument types are allowed");
+      auto portType = portTypes[portIndex].cast<TypeAttr>().getValue();
+      if (blockType != portType)
+        llvm::errs() << blockType << ", " << portType << "\n";
       if (blockType != portType)
         return module.emitOpError(
             "block argument types should match signature types");
-    }
-
-    if (argumentIndex < block.getNumArguments()) {
-      assert(ssaPresence == ModuleArgumentSSAPresence::ConstOnly);
-      assert(!isConst(block.getArgument(argumentIndex).getType()));
-      return module.emitOpError(
-          "only 'const' block argument types are allowed");
     }
   }
 

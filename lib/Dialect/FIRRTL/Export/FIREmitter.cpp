@@ -256,7 +256,7 @@ void Emitter::emitModule(FExtModuleOp op) {
   indent() << "extmodule " << op.getName() << " :\n";
   addIndent();
 
-  Block *body = op.getBody().empty() ? nullptr : &op.getBody().front();
+  auto *body = op.getOptionalBodyBlock();
 
   // Emit the ports.
   auto ports = op.getPorts();
@@ -292,8 +292,8 @@ void Emitter::emitModule(FExtModuleOp op) {
   }
 
   // Emit the module body if present.
-  if (auto &region = op.getBody(); !region.empty()) {
-    emitStatementsInBlock(region.front());
+  if (body) {
+    emitStatementsInBlock(*body);
     valueNames.clear();
     valueNamesStorage.clear();
   }
