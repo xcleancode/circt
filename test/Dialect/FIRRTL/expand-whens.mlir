@@ -530,4 +530,22 @@ firrtl.module @aggregate_regreset(in %clock: !firrtl.clock, in %reset: !firrtl.u
   // CHECK-NEXT: %2 = firrtl.subindex %0[1]
   // CHECK-NEXT: firrtl.connect %2, %2
 }
+
+// Check that const conditions work
+firrtl.module @ConstConditions(in %condition: !firrtl.const.uint<1>, out %string: !firrtl.const.string) {
+  firrtl.when %condition : !firrtl.const.uint<1> {
+    %0 = firrtl.stringconstant "True" : !firrtl.const.string
+    firrtl.strictconnect %string, %0 : !firrtl.const.string
+  } else {
+    %1 = firrtl.stringconstant "False" : !firrtl.const.string
+    firrtl.strictconnect %string, %1 : !firrtl.const.string
+  }
+}
+// CHECK-LABEL: firrtl.module @ConstConditions(in %condition: !firrtl.const.uint<1>, out %string: !firrtl.const.string) {
+// CHECK-NEXT:   %0 = firrtl.stringconstant "True" : !firrtl.const.string
+// CHECK-NEXT:   %1 = firrtl.not %condition : (!firrtl.const.uint<1>) -> !firrtl.const.uint<1>
+// CHECK-NEXT:   %2 = firrtl.stringconstant "False" : !firrtl.const.string
+// CHECK-NEXT:   %3 = firrtl.mux(%condition, %0, %2) : (!firrtl.const.uint<1>, !firrtl.const.string, !firrtl.const.string) -> !firrtl.const.string
+// CHECK-NEXT:   firrtl.connect %string, %3 : !firrtl.const.string, !firrtl.const.string
+// CHECK-NEXT: }
 }

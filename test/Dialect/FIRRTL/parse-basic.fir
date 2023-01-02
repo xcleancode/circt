@@ -1113,3 +1113,124 @@ circuit MyModule :     ; CHECK: firrtl.circuit "MyModule" {
     smem testharness : UInt<8>[16] [34359738368]
     node w_addr = UInt<36>(42) @[Cat.scala 31:58]
     write mport MPORT = testharness[w_addr], clock
+
+  ; Const port and literals should parse to const types
+  ; CHECK-LABEL: firrtl.module private @ConstPorts(
+  ; CHECK-SAME: in %intIn: !firrtl.uint<4>,
+  ; CHECK-SAME: in %constIntIn: !firrtl.const.uint<4>,
+  ; CHECK-SAME: in %constBundleIn: !firrtl.const.bundle<a: sint<3>, b flip: uint<4>, c: string>,
+  ; CHECK-SAME: out %intOut: !firrtl.uint<4>,
+  ; CHECK-SAME: out %constIntOut: !firrtl.const.uint<4>,
+  ; CHECK-SAME: out %constStringOut: !firrtl.const.string,
+  ; CHECK-SAME: out %constArrayOut: !firrtl.const.vector<sint<3>, 3>)
+  ; CHECK-SAME: {
+  module ConstPorts:
+    input intIn: UInt<4>
+    input constIntIn: const UInt<4>
+    input constBundleIn: const {a: SInt<3>, flip b: UInt<4>, c: String}
+    output intOut: UInt<4>
+    output constIntOut: const UInt<4>
+    output constStringOut: const String
+    output constArrayOut: const SInt<3>[3]
+
+    ; CHECK-NEXT: [[TMP0:%.+]] = firrtl.subfield %constBundleIn[c] : !firrtl.const.bundle<a: sint<3>, b flip: uint<4>, c: string>
+    ; CHECK-NEXT: [[TMP1:%.+]] = firrtl.subindex %constArrayOut[2] : !firrtl.const.vector<sint<3>, 3>
+    ; CHECK-NEXT: [[TMP2:%.+]] = firrtl.subindex %constArrayOut[1] : !firrtl.const.vector<sint<3>, 3>
+    ; CHECK-NEXT: [[TMP3:%.+]] = firrtl.subfield %constBundleIn[a] : !firrtl.const.bundle<a: sint<3>, b flip: uint<4>, c: string>
+    ; CHECK-NEXT: [[TMP4:%.+]] = firrtl.subindex %constArrayOut[0] : !firrtl.const.vector<sint<3>, 3>
+    ; CHECK-NEXT: [[TMP5:%.+]] = firrtl.subfield %constBundleIn[b] : !firrtl.const.bundle<a: sint<3>, b flip: uint<4>, c: string>
+    ; CHECK-NEXT: firrtl.strictconnect %intOut, %intIn : !firrtl.uint<4>
+    ; CHECK-NEXT: firrtl.strictconnect %constIntOut, %constIntIn : !firrtl.const.uint<4>
+    ; CHECK-NEXT: [[TMP6:%.+]] = firrtl.constant 4 : !firrtl.const.uint<4>
+    ; CHECK-NEXT: firrtl.strictconnect [[TMP5]], [[TMP6]] : !firrtl.const.uint<4>
+    ; CHECK-NEXT: firrtl.strictconnect [[TMP4]], [[TMP3]] : !firrtl.const.sint<3>
+    ; CHECK-NEXT: [[TMP7:%.+]] = firrtl.constant 0 : !firrtl.const.uint<4>
+    ; CHECK-NEXT: [[TMP8:%.+]] = firrtl.eq %constIntIn, [[TMP7]] : (!firrtl.const.uint<4>, !firrtl.const.uint<4>) -> !firrtl.const.uint<1>
+    ; CHECK-NEXT: [[TMP9:%.+]] = firrtl.constant -1 : !firrtl.const.sint<3>
+    ; CHECK-NEXT: [[TMP10:%.+]] = firrtl.constant -2 : !firrtl.const.sint<3>
+    ; CHECK-NEXT: [[TMP11:%.+]] = firrtl.constant 1 : !firrtl.const.sint<3>
+    ; CHECK-NEXT: [[TMP12:%.+]] = firrtl.constant 2 : !firrtl.const.sint<3>
+    intOut <= intIn
+    constIntOut <= constIntIn
+    constBundleIn.b <= const UInt<4>(4)
+    constArrayOut[0] <= constBundleIn.a
+
+    ; CHECK-NEXT: firrtl.when [[TMP8]] : !firrtl.const.uint<1> {
+    when eq(constIntIn, const UInt<4>(0)):
+      ; CHECK-NEXT:   [[TMP13:%.+]] = firrtl.stringconstant "Zero" : !firrtl.const.string
+      ; CHECK-NEXT:   firrtl.strictconnect %constStringOut, [[TMP13]] : !firrtl.const.string
+      constStringOut <= const String("Zero")
+      ; CHECK-NEXT:   firrtl.strictconnect [[TMP2]], [[TMP9]] : !firrtl.const.sint<3>
+      constArrayOut[1] <= const SInt<3>(-1)
+      ; CHECK-NEXT:   firrtl.strictconnect [[TMP1]], [[TMP10]] : !firrtl.const.sint<3>
+      constArrayOut[2] <= const SInt<3>(-2)
+    ; CHECK-NEXT: } else {
+    else:
+      ; CHECK-NEXT:   firrtl.strictconnect %constStringOut, [[TMP0]] : !firrtl.const.string
+      constStringOut <= constBundleIn.c
+      ; CHECK-NEXT:   firrtl.strictconnect [[TMP2]], [[TMP11]] : !firrtl.const.sint<3>
+      constArrayOut[1] <= const SInt<3>(1)
+      ; CHECK-NEXT:   firrtl.strictconnect [[TMP1]], [[TMP12]] : !firrtl.const.sint<3>
+      constArrayOut[2] <= const SInt<3>(2)
+    ; CHECK-NEXT: }
+  ; CHECK-NEXT: }
+
+  ; An extmodule with const ports should have a block with ssa values for each const port,
+  ; while non-const ports should not have ssa values
+  ; CHECK-LABEL: firrtl.extmodule private @ExtConstPorts(
+  ; CHECK-SAME: in intIn: !firrtl.uint<4>,
+  ; CHECK-SAME: in %constIntIn: !firrtl.const.uint<4>,
+  ; CHECK-SAME: in %constBundleIn: !firrtl.const.bundle<a: sint<3>, b flip: uint<4>, c: string>,
+  ; CHECK-SAME: out intOut: !firrtl.uint<4>,
+  ; CHECK-SAME: out %constIntOut: !firrtl.const.uint<4>,
+  ; CHECK-SAME: out %constStringOut: !firrtl.const.string,
+  ; CHECK-SAME: out %constArrayOut: !firrtl.const.vector<sint<3>, 3>)
+  ; CHECK-SAME: {
+  extmodule ExtConstPorts:
+    input intIn: UInt<4>
+    input constIntIn: const UInt<4>
+    input constBundleIn: const {a: SInt<3>, flip b: UInt<4>, c: String}
+    output intOut: UInt<4>
+    output constIntOut: const UInt<4>
+    output constStringOut: const String
+    output constArrayOut: const SInt<3>[3]
+
+    ; CHECK-NEXT: [[TMP0:%.+]] = firrtl.subfield %constBundleIn[c] : !firrtl.const.bundle<a: sint<3>, b flip: uint<4>, c: string>
+    ; CHECK-NEXT: [[TMP1:%.+]] = firrtl.subindex %constArrayOut[2] : !firrtl.const.vector<sint<3>, 3>
+    ; CHECK-NEXT: [[TMP2:%.+]] = firrtl.subindex %constArrayOut[1] : !firrtl.const.vector<sint<3>, 3>
+    ; CHECK-NEXT: [[TMP3:%.+]] = firrtl.subfield %constBundleIn[a] : !firrtl.const.bundle<a: sint<3>, b flip: uint<4>, c: string>
+    ; CHECK-NEXT: [[TMP4:%.+]] = firrtl.subindex %constArrayOut[0] : !firrtl.const.vector<sint<3>, 3>
+    ; CHECK-NEXT: [[TMP5:%.+]] = firrtl.subfield %constBundleIn[b] : !firrtl.const.bundle<a: sint<3>, b flip: uint<4>, c: string>
+    ; CHECK-NEXT: firrtl.strictconnect %constIntOut, %constIntIn : !firrtl.const.uint<4>
+    ; CHECK-NEXT: [[TMP6:%.+]] = firrtl.constant 4 : !firrtl.const.uint<4>
+    ; CHECK-NEXT: firrtl.strictconnect [[TMP5]], [[TMP6]] : !firrtl.const.uint<4>
+    ; CHECK-NEXT: firrtl.strictconnect [[TMP4]], [[TMP3]] : !firrtl.const.sint<3>
+    ; CHECK-NEXT: [[TMP7:%.+]] = firrtl.constant 0 : !firrtl.const.uint<4>
+    ; CHECK-NEXT: [[TMP8:%.+]] = firrtl.eq %constIntIn, [[TMP7]] : (!firrtl.const.uint<4>, !firrtl.const.uint<4>) -> !firrtl.const.uint<1>
+    ; CHECK-NEXT: [[TMP9:%.+]] = firrtl.constant -1 : !firrtl.const.sint<3>
+    ; CHECK-NEXT: [[TMP10:%.+]] = firrtl.constant -2 : !firrtl.const.sint<3>
+    ; CHECK-NEXT: [[TMP11:%.+]] = firrtl.constant 1 : !firrtl.const.sint<3>
+    ; CHECK-NEXT: [[TMP12:%.+]] = firrtl.constant 2 : !firrtl.const.sint<3>
+    constIntOut <= constIntIn
+    constBundleIn.b <= const UInt<4>(4)
+    constArrayOut[0] <= constBundleIn.a
+
+    ; CHECK-NEXT: firrtl.when [[TMP8]] : !firrtl.const.uint<1> {
+    when eq(constIntIn, const UInt<4>(0)):
+      ; CHECK-NEXT:   [[TMP13:%.+]] = firrtl.stringconstant "Zero" : !firrtl.const.string
+      ; CHECK-NEXT:   firrtl.strictconnect %constStringOut, [[TMP13]] : !firrtl.const.string
+      constStringOut <= const String("Zero")
+      ; CHECK-NEXT:   firrtl.strictconnect [[TMP2]], [[TMP9]] : !firrtl.const.sint<3>
+      constArrayOut[1] <= const SInt<3>(-1)
+      ; CHECK-NEXT:   firrtl.strictconnect [[TMP1]], [[TMP10]] : !firrtl.const.sint<3>
+      constArrayOut[2] <= const SInt<3>(-2)
+    ; CHECK-NEXT: } else {
+    else:
+      ; CHECK-NEXT:   firrtl.strictconnect %constStringOut, [[TMP0]] : !firrtl.const.string
+      constStringOut <= constBundleIn.c
+      ; CHECK-NEXT:   firrtl.strictconnect [[TMP2]], [[TMP11]] : !firrtl.const.sint<3>
+      constArrayOut[1] <= const SInt<3>(1)
+      ; CHECK-NEXT:   firrtl.strictconnect [[TMP1]], [[TMP12]] : !firrtl.const.sint<3>
+      constArrayOut[2] <= const SInt<3>(2)
+    ; CHECK-NEXT: }
+  ; CHECK-NEXT: }
