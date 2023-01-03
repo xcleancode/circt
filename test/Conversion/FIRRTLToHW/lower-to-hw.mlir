@@ -1807,7 +1807,7 @@ firrtl.circuit "Simple"   attributes {annotations = [{class =
     // CHECK: %[[foo:.*]] = sv.constantStr "foo"
     // CHECK: sv.system "test$plusargs"(%[[foo]])
 
-    %3, %4 = firrtl.int.plusargs.value "foo" : !firrtl.uint<5>
+    %3, %4 = firrtl.int.plusargs.value "foo" : !firrtl.uint<1>, !firrtl.uint<5>
     firrtl.strictconnect %io3, %3 : !firrtl.uint<1>
     firrtl.strictconnect %io4, %4 : !firrtl.uint<5>
     // CHECK: %[[foo:.*]] = sv.constantStr "foo"
