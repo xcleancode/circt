@@ -12,7 +12,6 @@ set(PYCDE_INTEGRATION_TEST_DEPENDS
   circt-rtl-sim
   esi-cosim-runner
   PyCDE
-  mlir-opt
   hlstool
   CIRCTMLIRPythonModules
   CIRCTPythonModules)
