@@ -697,7 +697,7 @@ static LogicalResult processBuffer(
         firrtl::createRandomizeRegisterInitPass());
 
   if (!disableCheckCombCycles) {
-    if (useOldCheckCombCycles) {
+    if (true) {
       if (preserveAggregate == firrtl::PreserveAggregate::None)
         pm.nest<firrtl::CircuitOp>().addPass(
             firrtl::createCheckCombCyclesPass());
