@@ -22,6 +22,8 @@
 #include "circt/Conversion/ExportVerilog.h"
 #include "circt/Dialect/Comb/CombOps.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -684,9 +686,11 @@ static void legalizeHWModule(Block &block, const LoweringOptions &options) {
   // avoid processing same operations infinitely.
   DenseSet<Operation *> visitedAlwaysInlineOperations;
 
-  for (Block::iterator opIterator = block.begin(), e = block.end();
-       opIterator != e;) {
+  for (Block::iterator opIterator = block.begin(); opIterator != block.end();) {
     auto &op = *opIterator++;
+
+    if (isa<hw::BitcastOp>(op))
+      op.emitError("bitcast remains");
 
     // Name legalization should have happened in a different pass for these sv
     // elements and we don't want to change their name through re-legalization
@@ -964,6 +968,129 @@ void ExportVerilog::prepareHWModule(hw::HWModuleOp module,
                                     const LoweringOptions &options) {
   // Zero-valued logic pruning.
   pruneZeroValuedLogic(module);
+  using namespace mlir;
+  class MyPattern : public RewritePattern {
+  public:
+    MyPattern(MLIRContext *context)
+        : RewritePattern(hw::BitcastOp::getOperationName(), 0, context) {}
+
+    /// In this section, the `match` and `rewrite` implementation is specified
+    /// using a single hook.
+    LogicalResult matchAndRewrite(Operation *op,
+                                  PatternRewriter &builder) const override {
+      // The `matchAndRewrite` method performs both the matching and the
+      // mutation. Note that the match must reach a successful point before IR
+      // mutation may take place.
+      auto bitcast = cast<hw::BitcastOp>(op);
+      // array to int --> concat(..)
+      // int   to array -> arary_create(extract(..))
+      // array to array -> (array -> int, int -> array)
+      auto loc = bitcast.getLoc();
+
+      if (bitcast.getInput().getType().isa<hw::ArrayType>() &&
+          bitcast.getType().isa<hw::ArrayType>()) {
+        auto inputType =
+            builder.getIntegerType(hw::getBitWidth(bitcast.getType()));
+        // array -> integer, integer -> array
+
+        auto b1 =
+            builder.create<hw::BitcastOp>(loc, inputType, bitcast.getInput());
+        builder.replaceOpWithNewOp<hw::BitcastOp>(op, bitcast.getType(), b1);
+        return success();
+      }
+
+      if (bitcast.getInput().getType().isa<hw::ArrayType>() &&
+          bitcast.getInput()
+              .getType()
+              .cast<hw::ArrayType>()
+              .getElementType()
+              .isa<IntegerType>() &&
+          bitcast.getType().isa<IntegerType>()) {
+        // array -> integer
+        // Assume that 1d
+        auto array = bitcast.getInput().getType().cast<hw::ArrayType>();
+
+        SmallVector<Value> newValues;
+        Value first = {};
+        for (unsigned i = 0; i < array.getSize(); i++) {
+          auto constant = builder.create<hw::ConstantOp>(
+              loc, APInt(llvm::Log2_64_Ceil(array.getSize()), i));
+          if (!first)
+            first = constant;
+
+          newValues.push_back(builder.createOrFold<hw::ArrayGetOp>(
+              loc, bitcast.getInput(), constant));
+        }
+        std::reverse(newValues.begin(), newValues.end());
+        builder.replaceOpWithNewOp<comb::ConcatOp>(op, newValues);
+        return success();
+      }
+
+      if (bitcast.getType().isa<hw::ArrayType>() &&
+          bitcast.getType()
+              .cast<hw::ArrayType>()
+              .getElementType()
+              .isa<IntegerType>() &&
+          bitcast.getInput().getType().isa<IntegerType>()) {
+        // array -> integer
+        // Assume that 1d
+        auto array = bitcast.getType().cast<hw::ArrayType>();
+
+        SmallVector<Value> newValues;
+        auto width = array.getElementType().cast<IntegerType>().getWidth();
+        for (unsigned i = 0, idx = 0; i < array.getSize(); i++, idx += width)
+          newValues.push_back(builder.createOrFold<comb::ExtractOp>(
+              loc, bitcast.getInput(), idx, width));
+        std::reverse(newValues.begin(), newValues.end());
+        builder.replaceOpWithNewOp<hw::ArrayCreateOp>(op, newValues);
+        return success();
+      }
+      return failure();
+    }
+  };
+  class MyPattern2 : public RewritePattern {
+  public:
+    MyPattern2(MLIRContext *context)
+        : RewritePattern(hw::ArrayConcatOp::getOperationName(), 0, context) {}
+
+    /// In this section, the `match` and `rewrite` implementation is specified
+    /// using a single hook.
+    LogicalResult matchAndRewrite(Operation *op,
+                                  PatternRewriter &builder) const override {
+      // The `matchAndRewrite` method performs both the matching and the
+      // mutation. Note that the match must reach a successful point before IR
+      // mutation may take place.
+      auto concat = cast<hw::ArrayConcatOp>(op);
+      // array to int --> concat(..)
+      // int   to array -> arary_create(extract(..))
+      // array to array -> (array -> int, int -> array)
+      auto loc = concat.getLoc();
+      concat.getType();
+      SmallVector<Value> newValues;
+      for (auto c : concat.getOperands()) {
+        for (auto i : llvm::seq(size_t(0),
+                                c.getType().cast<hw::ArrayType>().getSize())) {
+          auto constant = builder.create<hw::ConstantOp>(
+              loc, APInt(llvm::Log2_64_Ceil(
+                             c.getType().cast<hw::ArrayType>().getSize()),
+                         c.getType().cast<hw::ArrayType>().getSize() - 1 - i));
+          newValues.push_back(
+              builder.createOrFold<hw::ArrayGetOp>(loc, c, constant));
+        }
+      }
+      builder.replaceOpWithNewOp<hw::ArrayCreateOp>(op, newValues);
+
+      return failure();
+    }
+  };
+  RewritePatternSet owningPatterns(module.getContext());
+  owningPatterns.add<MyPattern>(module.getContext());
+
+  owningPatterns.add<MyPattern2>(module.getContext());
+
+  auto patterns = FrozenRewritePatternSet(std::move(owningPatterns));
+
+  applyPatternsAndFoldGreedily(module, patterns);
 
   // Legalization.
   legalizeHWModule(*module.getBodyBlock(), options);

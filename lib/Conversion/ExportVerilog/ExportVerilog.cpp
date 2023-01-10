@@ -341,7 +341,7 @@ static Type stripUnpackedTypes(Type type) {
       .Case<InOutType>([](InOutType inoutType) {
         return stripUnpackedTypes(inoutType.getElementType());
       })
-      .Case<UnpackedArrayType>([](UnpackedArrayType arrayType) {
+      .Case<ArrayType, UnpackedArrayType>([](auto arrayType) {
         return stripUnpackedTypes(arrayType.getElementType());
       })
       .Default([](Type type) { return type; });
@@ -1398,12 +1398,12 @@ static bool printPackedTypeImpl(Type type, raw_ostream &os, Location loc,
         emitDims(dims, os, loc, emitter);
         return true;
       })
-      .Case<ArrayType>([&](ArrayType arrayType) {
-        dims.push_back(arrayType.getSizeAttr());
-        return printPackedTypeImpl(arrayType.getElementType(), os, loc, dims,
-                                   implicitIntType, singleBitDefaultType,
-                                   emitter);
-      })
+      // .Case<ArrayType>([&](ArrayType arrayType) {
+      //   dims.push_back(arrayType.getSizeAttr());
+      //   return printPackedTypeImpl(arrayType.getElementType(), os, loc, dims,
+      //                              implicitIntType, singleBitDefaultType,
+      //                              emitter);
+      // })
       .Case<InOutType>([&](InOutType inoutType) {
         return printPackedTypeImpl(inoutType.getElementType(), os, loc, dims,
                                    implicitIntType, singleBitDefaultType,
@@ -1448,7 +1448,7 @@ static bool printPackedTypeImpl(Type type, raw_ostream &os, Location loc,
       })
 
       .Case<InterfaceType>([](InterfaceType ifaceType) { return false; })
-      .Case<UnpackedArrayType>([&](UnpackedArrayType arrayType) {
+      .Case<ArrayType, UnpackedArrayType>([&](auto arrayType) {
         os << "<<unexpected unpacked array>>";
         mlir::emitError(loc, "Unexpected unpacked array in packed type ")
             << arrayType;
@@ -1502,7 +1502,7 @@ void ModuleEmitter::printUnpackedTypePostfix(Type type, raw_ostream &os) {
       .Case<InOutType>([&](InOutType inoutType) {
         printUnpackedTypePostfix(inoutType.getElementType(), os);
       })
-      .Case<UnpackedArrayType>([&](UnpackedArrayType arrayType) {
+      .Case<ArrayType, UnpackedArrayType>([&](auto arrayType) {
         os << "[0:" << (arrayType.getSize() - 1) << "]";
         printUnpackedTypePostfix(arrayType.getElementType(), os);
       })
@@ -2624,19 +2624,19 @@ SubExprInfo ExprEmitter::visitTypeOp(ArrayCreateOp op) {
   if (hasSVAttributes(op))
     emitError(op, "SV attributes emission is unimplemented for the op");
 
-  if (op.isUniform()) {
-    ps << "{";
+  if (false && op.isUniform()) {
+    ps << "'{";
     ps.addAsString(op.getInputs().size());
     ps << "{";
     emitSubExpr(op.getUniformElement(), LowestPrecedence);
     ps << "}}";
   } else {
     emitBracedList(
-        op.getInputs(), [&]() { ps << "{"; },
+        op.getInputs(), [&]() { ps << "'{"; },
         [&](Value v) {
-          ps << "{";
+          // ps << "{";
           emitSubExprIBox2(v);
-          ps << "}";
+          // ps << "}";
         },
         [&]() { ps << "}"; });
   }
@@ -2647,7 +2647,24 @@ SubExprInfo ExprEmitter::visitTypeOp(ArrayConcatOp op) {
   if (hasSVAttributes(op))
     emitError(op, "SV attributes emission is unimplemented for the op");
 
-  emitBracedList(op.getOperands());
+  emitBracedList(
+      op.getInputs(), [&]() { ps << "'{"; },
+      [&](Value v) {
+        // ps << "{";
+        if (auto in = v.getDefiningOp<ArrayCreateOp>()) {
+          emitBracedList(
+              in.getInputs(), [&]() { ps << "/*flatten*/"; },
+              [&](Value v) {
+                // ps << "{";
+                emitSubExprIBox2(v);
+                // ps << "}";
+              },
+              [&]() { ps << "/*flatten*/"; });
+        } else
+          emitSubExprIBox2(v);
+        // ps << "}";
+      },
+      [&]() { ps << "}"; });
   return {Unary, IsUnsigned};
 }
 
@@ -4512,7 +4529,7 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
     }
 
     // Try inlining an assignment into declarations.
-    if (isa<WireOp, LogicOp>(op) &&
+    if (false && isa<WireOp, LogicOp>(op) &&
         !op->getParentOp()->hasTrait<ProceduralRegion>()) {
       // Get a single assignments if any.
       if (auto singleAssign = getSingleAssignAndCheckUsers<AssignOp>(op)) {
@@ -4532,7 +4549,8 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
     }
 
     // Try inlining a blocking assignment to logic op declaration.
-    if (isa<LogicOp>(op) && op->getParentOp()->hasTrait<ProceduralRegion>()) {
+    if (false && isa<LogicOp>(op) &&
+        op->getParentOp()->hasTrait<ProceduralRegion>()) {
       // Get a single assignment which might be possible to inline.
       if (auto singleAssign = getSingleAssignAndCheckUsers<BPAssignOp>(op)) {
         // It is necessary for the assignment to dominate users of the op.
