@@ -1503,7 +1503,7 @@ void ModuleEmitter::printUnpackedTypePostfix(Type type, raw_ostream &os) {
         printUnpackedTypePostfix(inoutType.getElementType(), os);
       })
       .Case<ArrayType, UnpackedArrayType>([&](auto arrayType) {
-        os << "[0:" << (arrayType.getSize() - 1) << "]";
+        os << "[" << (arrayType.getSize() - 1) << ":0]";
         printUnpackedTypePostfix(arrayType.getElementType(), os);
       })
       .Case<InterfaceType>([&](auto) {
@@ -2624,7 +2624,7 @@ SubExprInfo ExprEmitter::visitTypeOp(ArrayCreateOp op) {
   if (hasSVAttributes(op))
     emitError(op, "SV attributes emission is unimplemented for the op");
 
-  if (false && op.isUniform()) {
+  if (op.isUniform()) {
     ps << "'{";
     ps.addAsString(op.getInputs().size());
     ps << "{";

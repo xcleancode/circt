@@ -1061,24 +1061,29 @@ void ExportVerilog::prepareHWModule(hw::HWModuleOp module,
       // mutation. Note that the match must reach a successful point before IR
       // mutation may take place.
       auto concat = cast<hw::ArrayConcatOp>(op);
-      // array to int --> concat(..)
-      // int   to array -> arary_create(extract(..))
-      // array to array -> (array -> int, int -> array)
+      bool isP = op->getParentOp()->hasTrait<ProceduralRegion>();
       auto loc = concat.getLoc();
       concat.getType();
       SmallVector<Value> newValues;
+      Value wire =
+          isP ? (Value)builder.create<sv::LogicOp>(loc, concat.getType())
+              : (Value)builder.create<sv::WireOp>(loc, concat.getType());
+      unsigned index = concat.getType().cast<hw::ArrayType>().getSize();
       for (auto c : concat.getOperands()) {
-        for (auto i : llvm::seq(size_t(0),
-                                c.getType().cast<hw::ArrayType>().getSize())) {
-          auto constant = builder.create<hw::ConstantOp>(
-              loc, APInt(llvm::Log2_64_Ceil(
-                             c.getType().cast<hw::ArrayType>().getSize()),
-                         c.getType().cast<hw::ArrayType>().getSize() - 1 - i));
-          newValues.push_back(
-              builder.createOrFold<hw::ArrayGetOp>(loc, c, constant));
-        }
+        index -= c.getType().cast<hw::ArrayType>().getSize();
+        auto constant = builder.create<hw::ConstantOp>(
+            loc, APInt(llvm::Log2_64_Ceil(
+                           concat.getType().cast<hw::ArrayType>().getSize()),
+                       index));
+        auto t = builder.create<sv::IndexedPartSelectInOutOp>(
+            loc, wire, constant, c.getType().cast<hw::ArrayType>().getSize());
+        if(isP)
+        builder.create<sv::BPAssignOp>(loc, t, c);
+
+        else
+        builder.create<sv::AssignOp>(loc, t, c);
       }
-      builder.replaceOpWithNewOp<hw::ArrayCreateOp>(op, newValues);
+      builder.replaceOpWithNewOp<sv::ReadInOutOp>(op, wire);
 
       return failure();
     }
