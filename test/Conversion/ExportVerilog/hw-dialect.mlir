@@ -1346,3 +1346,12 @@ hw.module @inline_bitcast_in_concat(%in1: i7, %in2: !hw.array<8xi4>) -> (out: i3
   %0 = comb.concat %in1, %r2: i7, i32
   hw.output %0 : i39
 }
+
+// CHECK-LABEL: module DontInlineAssignmentForUnpackedArrays(
+hw.module @DontInlineAssignmentForUnpackedArrays(%a: !hw.uarray<2xi1>) {
+// CHECK:      wire w
+// CHECK-NEXT: assign w = a;
+   %w = sv.wire  : !hw.inout<uarray<2xi1>>
+   sv.assign %w, %a : !hw.uarray<2xi1>
+   hw.output
+}

@@ -347,6 +347,11 @@ static Type stripUnpackedTypes(Type type) {
       .Default([](Type type) { return type; });
 }
 
+/// Return true if the type has a leading unpacked type.
+static bool hasLeadingUnpackedTypes(Type type) {
+  return stripUnpackedTypes(type) != type;
+}
+
 /// Return true if type has a struct type as a subtype.
 static bool hasStructType(Type type) {
   return TypeSwitch<Type, bool>(type)
@@ -4511,46 +4516,49 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
       });
     }
 
-    // Try inlining an assignment into declarations.
+    // Try inlining assignments into wire/logic declarations. If the op declares
+    // an unpacked value, it's not allowed to inline the assignment.
     if (isa<WireOp, LogicOp>(op) &&
-        !op->getParentOp()->hasTrait<ProceduralRegion>()) {
-      // Get a single assignments if any.
-      if (auto singleAssign = getSingleAssignAndCheckUsers<AssignOp>(op)) {
-        auto *source = singleAssign.getSrc().getDefiningOp();
-        // Check that the source value is OK to inline in the current emission
-        // point. A port or constant is fine, otherwise check that the assign is
-        // next to the operation.
-        if (!source || isa<ConstantOp>(source) ||
-            op->getNextNode() == singleAssign) {
-          ps << PP::space << "=" << PP::space;
-          ps.scopedBox(PP::ibox0, [&]() {
-            emitExpression(singleAssign.getSrc(), opsForLocation);
-          });
-          emitter.assignsInlined.insert(singleAssign);
+        !hasLeadingUnpackedTypes(type.cast<hw::InOutType>().getElementType())) {
+      // Try inlining a blocking assignment to logic op declaration.
+      if (op->getParentOp()->hasTrait<ProceduralRegion>()) {
+        assert(isa<LogicOp>(op) && "only logic op is expected");
+        // Get a single assignment which might be possible to inline.
+        if (auto singleAssign = getSingleAssignAndCheckUsers<BPAssignOp>(op)) {
+          // It is necessary for the assignment to dominate users of the op.
+          if (checkDominanceOfUsers(singleAssign, op)) {
+            auto *source = singleAssign.getSrc().getDefiningOp();
+            // A port or constant can be inlined at everywhere. Otherwise,
+            // check the validity by
+            // `isExpressionEmittedInlineIntoProceduralDeclaration`.
+            if (!source || isa<ConstantOp>(source) ||
+                isExpressionEmittedInlineIntoProceduralDeclaration(source,
+                                                                   *this)) {
+              ps << PP::space << "=" << PP::space;
+              ps.scopedBox(PP::ibox0, [&]() {
+                emitExpression(singleAssign.getSrc(), opsForLocation);
+              });
+              // Remember that the assignment and logic op are emitted into
+              // decl.
+              emitter.assignsInlined.insert(singleAssign);
+              emitter.expressionsEmittedIntoDecl.insert(op);
+            }
+          }
         }
-      }
-    }
-
-    // Try inlining a blocking assignment to logic op declaration.
-    if (isa<LogicOp>(op) && op->getParentOp()->hasTrait<ProceduralRegion>()) {
-      // Get a single assignment which might be possible to inline.
-      if (auto singleAssign = getSingleAssignAndCheckUsers<BPAssignOp>(op)) {
-        // It is necessary for the assignment to dominate users of the op.
-        if (checkDominanceOfUsers(singleAssign, op)) {
+      } else {
+        // Try inlining an assignment into declarations.
+        if (auto singleAssign = getSingleAssignAndCheckUsers<AssignOp>(op)) {
           auto *source = singleAssign.getSrc().getDefiningOp();
-          // A port or constant can be inlined at everywhere. Otherwise, check
-          // the validity by
-          // `isExpressionEmittedInlineIntoProceduralDeclaration`.
+          // Check that the source value is OK to inline in the current emission
+          // point. A port or constant is fine, otherwise check that the assign
+          // is next to the operation.
           if (!source || isa<ConstantOp>(source) ||
-              isExpressionEmittedInlineIntoProceduralDeclaration(source,
-                                                                 *this)) {
+              op->getNextNode() == singleAssign) {
             ps << PP::space << "=" << PP::space;
             ps.scopedBox(PP::ibox0, [&]() {
               emitExpression(singleAssign.getSrc(), opsForLocation);
             });
-            // Remember that the assignment and logic op are emitted into decl.
             emitter.assignsInlined.insert(singleAssign);
-            emitter.expressionsEmittedIntoDecl.insert(op);
           }
         }
       }
