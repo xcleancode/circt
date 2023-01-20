@@ -185,6 +185,8 @@ StringRef ExportVerilog::getSymOpName(Operation *symOp) {
           return attr.getValue();
         if (auto attr = op->getAttrOfType<StringAttr>("instanceName"))
           return attr.getValue();
+        if (auto attr = op->getAttrOfType<StringAttr>("sv.namehint"))
+          return attr.getValue();
         if (auto attr =
                 op->getAttrOfType<StringAttr>(SymbolTable::getSymbolAttrName()))
           return attr.getValue();
@@ -694,8 +696,8 @@ bool ExportVerilog::isExpressionEmittedInline(Operation *op,
   // Never create a temporary which is only going to be assigned to an output
   // port, wire, or reg.
   if (op->hasOneUse() &&
-      isa<hw::OutputOp, sv::AssignOp, sv::BPAssignOp, sv::PAssignOp>(
-          *op->getUsers().begin()))
+      isa<hw::OutputOp, sv::AssignOp, sv::BPAssignOp, sv::PAssignOp,
+          hw::InstanceOp>(*op->getUsers().begin()))
     return true;
 
   // If mux inlining is dissallowed, we cannot inline muxes.
@@ -772,7 +774,7 @@ struct ModuleNameManager {
   StringRef getName(Operation *op) {
     // If RegOp or WireOp, then result has the name.
     if (isa<sv::WireOp, sv::RegOp, sv::LogicOp, hw::InstanceOp,
-            sv::LocalParamOp>(op)) {
+            sv::LocalParamOp, sv::InterfaceInstanceOp>(op)) {
       assert(op->hasAttr("hw.verilogName"));
       return op->getAttrOfType<StringAttr>("hw.verilogName");
     }
@@ -784,7 +786,7 @@ struct ModuleNameManager {
   bool hasName(Operation *op) {
     // If RegOp or WireOp, then result has the name.
     if (isa<sv::WireOp, sv::RegOp, sv::LogicOp, hw::InstanceOp,
-            sv::LocalParamOp>(op))
+            sv::LocalParamOp, sv::InterfaceInstanceOp>(op))
       return op->hasAttr("hw.verilogName");
     return nameTable.count(ValueOrOp(op));
   }
@@ -797,14 +799,14 @@ private:
   StringRef getName(ValueOrOp valueOrOp) {
     // If RegOp or WireOp, then result has the name.
     if (auto val = valueOrOp.dyn_cast<Value>()) {
-      if (isa_and_nonnull<sv::WireOp, sv::RegOp, sv::LogicOp>(
-              val.getDefiningOp())) {
+      if (isa_and_nonnull<sv::WireOp, sv::RegOp, sv::LogicOp, sv::LocalParamOp,
+                          sv::InterfaceInstanceOp>(val.getDefiningOp())) {
         assert(val.getDefiningOp()->hasAttr("hw.verilogName"));
         return val.getDefiningOp()->getAttrOfType<StringAttr>("hw.verilogName");
       }
     }
     if (auto val = valueOrOp.dyn_cast<Operation *>()) {
-      if (isa<hw::InstanceOp>(val)) {
+      if (isa<hw::InstanceOp, sv::InterfaceInstanceOp>(val)) {
         assert(val->hasAttr("hw.verilogName"));
         return val->getAttrOfType<StringAttr>("hw.verilogName");
       }
@@ -2885,28 +2887,6 @@ void NameCollector::collectNames(Block &block) {
 
   SmallString<32> nameTmp;
 
-  // Pre-pass loop to first add any names that could be the result of re-naming.
-  // These constructs will have their names added regardless, and handling them
-  // first ensures any out of line expressions won't trample on names selected
-  // by re-naming. This could be combined into one pass through the IR that
-  // collects a worklist of exprs to re-visit instead of the double traversal.
-  for (auto &op : block) {
-    if (auto instance = dyn_cast<InstanceOp>(op)) {
-      names.addName(&op, getSymOpName(instance));
-      continue;
-    }
-
-    if (auto interface = dyn_cast<InterfaceInstanceOp>(op)) {
-      names.addName(interface.getResult(), getSymOpName(interface));
-      continue;
-    }
-
-    if (isa<WireOp, RegOp, LogicOp, LocalParamOp>(op)) {
-      names.addName(op.getResult(0), getSymOpName(&op));
-      continue;
-    }
-  }
-
   // Loop over all of the results of all of the ops. Anything that defines a
   // value needs to be noticed.
   for (auto &op : block) {
@@ -4732,7 +4712,6 @@ void ModuleEmitter::emitBind(BindOp op) {
         llvm::SmallPtrSet<Operation *, 4> ops;
         ExprEmitter(*this, ops, names)
             .emitExpression(portVal, LowestPrecedence);
-        // assert(!name.empty() && "bind port connection must have a name");
       }
       ps << ")";
 
