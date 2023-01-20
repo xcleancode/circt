@@ -165,7 +165,7 @@ static bool isDuplicatableExpression(Operation *op) {
 /// Return the verilog name of the operations that can define a symbol.
 /// Except for <WireOp, RegOp, LogicOp, LocalParamOp, InstanceOp>, check global
 /// state `getDeclarationVerilogName` for them.
-static StringRef getSymOpName(Operation *symOp) {
+StringRef ExportVerilog::getSymOpName(Operation *symOp) {
   // Typeswitch of operation types which can define a symbol.
   // If legalizeNames has renamed it, then the attribute must be set.
   if (auto attr = symOp->getAttrOfType<StringAttr>("hw.verilogName"))
@@ -771,8 +771,11 @@ struct ModuleNameManager {
   StringRef getName(Value value) { return getName(ValueOrOp(value)); }
   StringRef getName(Operation *op) {
     // If RegOp or WireOp, then result has the name.
-    if (isa<sv::WireOp, sv::RegOp, sv::LogicOp>(op))
-      return getName(op->getResult(0));
+    if (isa<sv::WireOp, sv::RegOp, sv::LogicOp, hw::InstanceOp,
+            sv::LocalParamOp>(op)) {
+      assert(op->hasAttr("hw.verilogName"));
+      return op->getAttrOfType<StringAttr>("hw.verilogName");
+    }
     return getName(ValueOrOp(op));
   }
 
@@ -780,8 +783,9 @@ struct ModuleNameManager {
 
   bool hasName(Operation *op) {
     // If RegOp or WireOp, then result has the name.
-    if (isa<sv::WireOp, sv::RegOp, sv::LogicOp>(op))
-      return nameTable.count(op->getResult(0));
+    if (isa<sv::WireOp, sv::RegOp, sv::LogicOp, hw::InstanceOp,
+            sv::LocalParamOp>(op))
+      return op->hasAttr("hw.verilogName");
     return nameTable.count(ValueOrOp(op));
   }
 
@@ -791,6 +795,20 @@ private:
   /// Retrieve a name from the name table.  The name must already have been
   /// added.
   StringRef getName(ValueOrOp valueOrOp) {
+    // If RegOp or WireOp, then result has the name.
+    if (auto val = valueOrOp.dyn_cast<Value>()) {
+      if (isa_and_nonnull<sv::WireOp, sv::RegOp, sv::LogicOp>(
+              val.getDefiningOp())) {
+        assert(val.getDefiningOp()->hasAttr("hw.verilogName"));
+        return val.getDefiningOp()->getAttrOfType<StringAttr>("hw.verilogName");
+      }
+    }
+    if (auto val = valueOrOp.dyn_cast<Operation *>()) {
+      if (isa<hw::InstanceOp>(val)) {
+        assert(val->hasAttr("hw.verilogName"));
+        return val->getAttrOfType<StringAttr>("hw.verilogName");
+      }
+    }
     auto entry = nameTable.find(valueOrOp);
     if (entry == nameTable.end()) {
       llvm::errs() << "Name: ";
@@ -4661,6 +4679,11 @@ void ModuleEmitter::emitBind(BindOp op) {
     // Emit the argument and result ports.
     auto opArgs = inst.getInputs();
     auto opResults = inst.getResults();
+    ModuleNameManager names;
+    for (auto arg : parentPortInfo.inputs) {
+      names.addName(parentMod.getArgument(arg.argNum),
+                    getPortVerilogName(parentMod, arg.argNum));
+    }
     for (auto &elt : childPortInfo) {
       // Figure out which value we are emitting.
       Value portVal =
@@ -4701,11 +4724,17 @@ void ModuleEmitter::emitBind(BindOp op) {
       ps << "." << PPExtString(elt.getName());
       ps.nbsp(maxNameLength - elt.getName().size());
       ps << " (";
-
-      // Emit the value as an expression.
-      auto name = getNameRemotely(portVal, parentPortInfo, parentMod);
-      assert(!name.empty() && "bind port connection must have a name");
-      ps << PPExtString(name) << ")";
+      if (elt.isOutput()) {
+        // Emit the value as an expression.
+        auto name = getNameRemotely(portVal, parentPortInfo, parentMod);
+        ps << PPExtString(name);
+      } else {
+        llvm::SmallPtrSet<Operation *, 4> ops;
+        ExprEmitter(*this, ops, names)
+            .emitExpression(portVal, LowestPrecedence);
+        // assert(!name.empty() && "bind port connection must have a name");
+      }
+      ps << ")";
 
       if (isZeroWidth)
         ps << PP::end; // Close never-break group.

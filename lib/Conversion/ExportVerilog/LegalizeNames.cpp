@@ -230,13 +230,17 @@ void GlobalNameResolver::legalizeModuleNames(HWModuleOp module) {
             op->getAttrOfType<StringAttr>(verilogNameAttr));
       } else if (auto name = getDeclarationName(op)) {
         declAndNames.push_back({op, name});
+      } else if (isa<WireOp, RegOp, LogicOp, LocalParamOp, hw::InstanceOp>(
+                     op)) {
+        declAndNames.push_back(
+            {op, StringAttr::get(op->getContext(), getSymOpName(op))});
       }
     }
   });
 
   for (auto [op, nameAttr] : declAndNames) {
     auto newName = nameResolver.getLegalName(nameAttr);
-    if (newName != nameAttr.getValue())
+    if (!newName.empty())
       op->setAttr(verilogNameAttr, StringAttr::get(ctxt, newName));
   }
 }

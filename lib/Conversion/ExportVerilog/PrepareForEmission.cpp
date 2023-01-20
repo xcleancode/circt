@@ -696,10 +696,9 @@ static void legalizeHWModule(Block &block, const LoweringOptions &options) {
     if (auto instance = dyn_cast<InstanceOp>(op)) {
       // Anchor return values to wires early
       lowerInstanceResults(instance);
-      // Anchor ports of instances when the instance is bound by bind op, or
-      // forced by the option.
-      if (instance->hasAttr("doNotPrint") ||
-          options.disallowExpressionInliningInPorts)
+      // Anchor ports of instances when `disallowExpressionInliningInPorts` is
+      // enabled.
+      if (options.disallowExpressionInliningInPorts)
         spillWiresForInstanceInputs(instance);
     }
 

@@ -1403,10 +1403,7 @@ hw.module @remoteInstDut(%i: i1, %j: i1, %z: i0) -> () {
   hw.instance "a1" sym @bindInst @extInst(_h: %mywire_rd: i1, _i: %myreg_rd: i1, _j: %j: i1, _k: %0: i1, _z: %z: i0) -> () {doNotPrint=1}
   hw.instance "a2" sym @bindInst2 @extInst(_h: %mywire_rd: i1, _i: %myreg_rd: i1, _j: %j: i1, _k: %0: i1, _z: %z: i0) -> () {doNotPrint=1}
   hw.instance "signed" sym @bindInst3 @extInst2(signed: %mywire_rd1 : i1, _i: %myreg_rd1 : i1, _j: %j: i1, _k: %0: i1, _z: %z: i0) -> () {doNotPrint=1}
-// CHECK: wire _signed__k
-// CHECK-NEXT: wire _a2__k = 1'h1;
-// CHECK-NEXT: wire _a1__k = 1'h1;
-// CHECK-NEXT: wire mywire
+// CHECK:      wire mywire
 // CHECK-NEXT: myreg
 // CHECK-NEXT: wire signed_0
 // CHECK-NEXT: reg  output_0
@@ -1711,14 +1708,14 @@ hw.module @bindInMod() {
 // CHECK-NEXT:   ._h (mywire),
 // CHECK-NEXT:   ._i (myreg),
 // CHECK-NEXT:   ._j (j),
-// CHECK-NEXT:   ._k (_a1__k)
+// CHECK-NEXT:   ._k (1'h1)
 // CHECK-NEXT: //._z (z)
 // CHECK-NEXT: );
 // CHECK-NEXT:  bind remoteInstDut extInst2 signed_1 (
 // CHECK-NEXT:    .signed_0 (signed_0),
 // CHECK-NEXT:    ._i       (output_0),
 // CHECK-NEXT:    ._j       (j),
-// CHECK-NEXT:    ._k       (_signed__k)
+// CHECK-NEXT:    ._k       (1'h1)
 // CHECK: endmodule
 
 sv.bind <@wait_order::@baz>
@@ -1734,7 +1731,7 @@ sv.bind #hw.innerNameRef<@remoteInstDut::@bindInst2>
 // CHECK-NEXT:   ._h (mywire),
 // CHECK-NEXT:   ._i (myreg),
 // CHECK-NEXT:   ._j (j),
-// CHECK-NEXT:   ._k (_a2__k)
+// CHECK-NEXT:   ._k (1'h1)
 // CHECK-NEXT: //._z (z)
 // CHECK-NEXT: );
 
@@ -1749,7 +1746,7 @@ hw.module @NastyPort(%.lots$of.dots: i1) -> (".more.dots": i1) {
 }
 sv.bind #hw.innerNameRef<@NastyPortParent::@foo>
 // CHECK-LABEL: bind NastyPortParent NastyPort foo (
-// CHECK-NEXT:    ._lots24of_dots (_foo__lots24of_dots)
+// CHECK-NEXT:    ._lots24of_dots (1'h0)
 // CHECK-NEXT:    ._more_dots     (_foo__more_dots)
 // CHECK-NEXT:  );
 

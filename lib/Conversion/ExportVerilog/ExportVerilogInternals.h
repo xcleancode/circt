@@ -301,6 +301,8 @@ static inline bool isExpressionAlwaysInline(Operation *op) {
   return false;
 }
 
+StringRef getSymOpName(Operation *symOp);
+
 /// Return whether an operation is a constant.
 static inline bool isConstantExpression(Operation *op) {
   return isa<hw::ConstantOp, sv::ConstantXOp, sv::ConstantZOp,
