@@ -136,7 +136,7 @@ static void legalizeModuleBody(const LoweringOptions &options,
                                HWModuleOp module,
                                const GlobalNameTable &globalNameTable) {
   NameCollisionResolver nameResolver;
-  // nameResolver.insertUsedName(getVerilogModuleName(module));
+  // Register names used by parameters.
   for (auto param : module.getParameters())
     nameResolver.insertUsedName(globalNameTable.getParameterVerilogName(
         module, param.cast<ParamDeclAttr>().getName()));
@@ -170,9 +170,9 @@ static void legalizeModuleBody(const LoweringOptions &options,
                      sv::InterfaceInstanceOp, sv::GenerateOp>(op)) {
         declAndNames.emplace_back(
             op, StringAttr::get(op->getContext(), getSymOpName(op)));
-        // Notice and renamify the labels on verification statements.
       } else if (isa<AssertOp, AssumeOp, CoverOp, AssertConcurrentOp,
                      AssumeConcurrentOp, CoverConcurrentOp>(op)) {
+        // Notice and renamify the labels on verification statements.
         if (auto labelAttr = op->getAttrOfType<StringAttr>("label"))
           declAndNames.emplace_back(op, labelAttr);
         else if (options.enforceVerifLabels) {
@@ -194,8 +194,8 @@ static void legalizeModuleBody(const LoweringOptions &options,
 
   for (auto [op, nameAttr] : declAndNames) {
     auto newName = nameResolver.getLegalName(nameAttr);
-    if (!newName.empty())
-      op->setAttr(verilogNameAttr, StringAttr::get(ctxt, newName));
+    assert(!newName.empty() && "must have valid name");
+    op->setAttr(verilogNameAttr, StringAttr::get(ctxt, newName));
   }
 }
 
