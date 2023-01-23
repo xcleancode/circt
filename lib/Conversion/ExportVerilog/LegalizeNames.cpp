@@ -169,7 +169,7 @@ static void legalizeModuleBody(const LoweringOptions &options,
       } else if (isa<WireOp, RegOp, LogicOp, LocalParamOp, hw::InstanceOp,
                      sv::InterfaceInstanceOp, sv::GenerateOp>(op)) {
         declAndNames.emplace_back(
-            op, StringAttr::get(op->getContext(), getSymOpName(op)));
+            op, StringAttr::get(op->getContext(), getVerilogName(op)));
       } else if (isa<AssertOp, AssumeOp, CoverOp, AssertConcurrentOp,
                      AssumeConcurrentOp, CoverConcurrentOp>(op)) {
         // Notice and renamify the labels on verification statements.

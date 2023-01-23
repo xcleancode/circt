@@ -165,7 +165,7 @@ static bool isDuplicatableExpression(Operation *op) {
 /// Return the verilog name of the operations that can define a symbol.
 /// Except for <WireOp, RegOp, LogicOp, LocalParamOp, InstanceOp>, check global
 /// state `getDeclarationVerilogName` for them.
-StringRef ExportVerilog::getSymOpName(Operation *symOp) {
+StringRef ExportVerilog::getVerilogName(Operation *symOp) {
   // Typeswitch of operation types which can define a symbol.
   // If legalizeNames has renamed it, then the attribute must be set.
   if (auto attr = symOp->getAttrOfType<StringAttr>("hw.verilogName"))
@@ -753,7 +753,7 @@ static void emitSVAttributesImpl(PPS &os, sv::SVAttributesAttr svAttrs) {
 //===----------------------------------------------------------------------===//
 /// Retrieve a name from the name table.  The name must already have been
 /// added.
-StringRef getVerilogName(Value val) {
+StringRef getVerilogValueName(Value val) {
   if (isa_and_nonnull<sv::WireOp, sv::RegOp, sv::LogicOp, sv::LocalParamOp,
                       sv::InterfaceInstanceOp>(val.getDefiningOp()))
     if (auto name =
@@ -764,19 +764,6 @@ StringRef getVerilogName(Value val) {
     return getPortVerilogName(port.getParentBlock()->getParentOp(),
                               port.getArgNumber());
   assert(false && "unhandled value");
-}
-
-StringRef getVerilogName(Operation *op) {
-  if (auto name = op->getAttrOfType<StringAttr>("hw.verilogName"))
-    return name;
-
-  llvm::errs() << "Name: ";
-  op->print(llvm::errs());
-  llvm::errs()
-      << " Not found in name table! Most likely indicates that the given "
-         "op did not have an emitter in ExportVerilog, and should have "
-         "been lowered away before reaching this point.";
-  assert(false && "name not found (see above error)");
 }
 
 //===----------------------------------------------------------------------===//
@@ -935,7 +922,7 @@ void EmitterBase::emitTextWithSubstitutions(
       if (item.hasPort()) {
         return getPortVerilogName(itemOp, item.getPort());
       }
-      StringRef symOpName = getSymOpName(itemOp);
+      StringRef symOpName = getVerilogName(itemOp);
       if (!symOpName.empty())
         return symOpName;
       emitError(itemOp, "cannot get name for symbol ") << sym;
@@ -1106,7 +1093,7 @@ StringAttr ExportVerilog::inferStructuralNameForTemporary(Value expr) {
   } else if (auto *op = expr.getDefiningOp()) {
     // Uses of a wire, register or logic can be done inline.
     if (isa<WireOp, RegOp, LogicOp>(op)) {
-      StringRef name = getSymOpName(op);
+      StringRef name = getVerilogName(op);
       result = StringAttr::get(expr.getContext(), name);
 
     } else if (auto nameHint = op->getAttrOfType<StringAttr>("sv.namehint")) {
@@ -1962,7 +1949,6 @@ private:
 
   /// Stream to emit expressions into, will add to buffer.
   TokenStream<BufferingPP> ps;
-
 };
 } // end anonymous namespace
 
@@ -2092,11 +2078,11 @@ SubExprInfo ExprEmitter::emitSubExpr(Value exp,
     // All wires are declared as unsigned, so if the client needed it signed,
     // emit a conversion.
     if (signRequirement == RequireSigned) {
-      ps << "$signed(" << PPExtString(getVerilogName(exp)) << ")";
+      ps << "$signed(" << PPExtString(getVerilogValueName(exp)) << ")";
       return {Symbol, IsSigned};
     }
 
-    ps << PPExtString(getVerilogName(exp));
+    ps << PPExtString(getVerilogValueName(exp));
     return {Symbol, IsUnsigned};
   }
 
@@ -2260,8 +2246,8 @@ SubExprInfo ExprEmitter::visitSV(GetModportOp op) {
     emitError(op, "SV attributes emission is unimplemented for the op");
 
   auto decl = op.getReferencedDecl(state.symbolCache);
-  ps << PPExtString(getVerilogName(op.getIface())) << "."
-     << PPExtString(getSymOpName(decl));
+  ps << PPExtString(getVerilogValueName(op.getIface())) << "."
+     << PPExtString(getVerilogName(decl));
   return {Selection, IsUnsigned};
 }
 
@@ -2285,8 +2271,8 @@ SubExprInfo ExprEmitter::visitSV(ReadInterfaceSignalOp op) {
 
   auto decl = op.getReferencedDecl(state.symbolCache);
 
-  ps << PPExtString(getVerilogName(op.getIface())) << "."
-     << PPExtString(getSymOpName(decl));
+  ps << PPExtString(getVerilogValueName(op.getIface())) << "."
+     << PPExtString(getVerilogName(decl));
   return {Selection, IsUnsigned};
 }
 
@@ -2314,13 +2300,13 @@ SubExprInfo ExprEmitter::visitSV(XMRRefOp op) {
   if (auto innerRef = dyn_cast<InnerRefAttr>(refAttr)) {
     auto ref = state.symbolCache.getInnerDefinition(innerRef.getModule(),
                                                     innerRef.getName());
-    ps << PPExtString(getSymOpName(
+    ps << PPExtString(getVerilogName(
               state.symbolCache.getDefinition(innerRef.getModule())))
        << ".";
     if (ref.hasPort())
       ps << PPExtString(getPortVerilogName(ref.getOp(), ref.getPort()));
     else
-      ps << PPExtString(getSymOpName(ref.getOp()));
+      ps << PPExtString(getVerilogName(ref.getOp()));
   } else {
     // The XMR is pointing at a GlobalRef.
     auto globalRef = cast<hw::HierPathOp>(state.symbolCache.getDefinition(
@@ -2328,7 +2314,7 @@ SubExprInfo ExprEmitter::visitSV(XMRRefOp op) {
     auto namepath = globalRef.getNamepathAttr().getValue();
     auto *module = state.symbolCache.getDefinition(
         cast<InnerRefAttr>(namepath.front()).getModule());
-    ps << PPExtString(getSymOpName(module));
+    ps << PPExtString(getVerilogName(module));
     for (auto sym : namepath) {
       ps << ".";
       auto innerRef = cast<InnerRefAttr>(sym);
@@ -2338,7 +2324,7 @@ SubExprInfo ExprEmitter::visitSV(XMRRefOp op) {
         ps << PPExtString(getPortVerilogName(ref.getOp(), ref.getPort()));
         continue;
       }
-      ps << PPExtString(getSymOpName(ref.getOp()));
+      ps << PPExtString(getVerilogName(ref.getOp()));
     }
   }
   auto leaf = op.getStringLeafAttr();
@@ -3128,7 +3114,7 @@ LogicalResult StmtEmitter::visitSV(InterfaceInstanceOp op) {
   assert(interfaceOp && "InterfaceInstanceOp has invalid symbol that does not "
                         "point to an interface");
 
-  auto verilogName = getSymOpName(interfaceOp);
+  auto verilogName = getVerilogName(interfaceOp);
   if (!prefix.empty())
     ps << PPExtString(prefix);
   ps << PPExtString(verilogName)
@@ -3418,7 +3404,7 @@ LogicalResult StmtEmitter::visitSV(ReadMemOp op) {
             .getInnerDefinition(op->getParentOfType<HWModuleOp>().getNameAttr(),
                                 op.getInnerSymAttr())
             .getOp();
-    ps << PPExtString(getSymOpName(reg));
+    ps << PPExtString(getVerilogName(reg));
   });
 
   ps << ");";
@@ -3433,11 +3419,11 @@ LogicalResult StmtEmitter::visitSV(GenerateOp op) {
   // TODO: location info?
   startStatement();
   ps << "generate" << PP::newline;
-  ps << "begin: " << PPExtString(getSymOpName(op));
+  ps << "begin: " << PPExtString(getVerilogName(op));
   setPendingNewline();
   emitStatementBlock(op.getBody().getBlocks().front());
   startStatement();
-  ps << "end: " << PPExtString(getSymOpName(op)) << PP::newline;
+  ps << "end: " << PPExtString(getVerilogName(op)) << PP::newline;
   ps << "endgenerate";
   setPendingNewline();
   return success();
@@ -4006,7 +3992,7 @@ LogicalResult StmtEmitter::visitStmt(InstanceOp op) {
     }
   }
 
-  ps << PP::nbsp << PPExtString(getSymOpName(op)) << " (";
+  ps << PP::nbsp << PPExtString(getVerilogName(op)) << " (";
 
   SmallVector<PortInfo> portInfo = getAllModulePortInfos(op);
 
@@ -4147,7 +4133,7 @@ LogicalResult StmtEmitter::visitSV(InterfaceOp op) {
   emitComment(op.getCommentAttr());
   // TODO: source info!
   startStatement();
-  ps << "interface " << PPExtString(getSymOpName(op)) << ";";
+  ps << "interface " << PPExtString(getVerilogName(op)) << ";";
   setPendingNewline();
   // FIXME: Don't emit the body of this as general statements, they aren't!
   emitStatementBlock(*op.getBodyBlock());
@@ -4168,7 +4154,7 @@ LogicalResult StmtEmitter::visitSV(InterfaceSignalOp op) {
     emitter.printPackedType(stripUnpackedTypes(op.getType()), os, op->getLoc(),
                             Type(), false);
   });
-  ps << PP::nbsp << PPExtString(getSymOpName(op));
+  ps << PP::nbsp << PPExtString(getVerilogName(op));
   ps.invokeWithStringOS(
       [&](auto &os) { emitter.printUnpackedTypePostfix(op.getType(), os); });
   ps << ";";
@@ -4180,14 +4166,14 @@ LogicalResult StmtEmitter::visitSV(InterfaceSignalOp op) {
 
 LogicalResult StmtEmitter::visitSV(InterfaceModportOp op) {
   startStatement();
-  ps << "modport " << PPExtString(getSymOpName(op)) << "(";
+  ps << "modport " << PPExtString(getVerilogName(op)) << "(";
 
   // TODO: revisit, better breaks/grouping.
   llvm::interleaveComma(op.getPorts(), ps, [&](const Attribute &portAttr) {
     auto port = portAttr.cast<ModportStructAttr>();
     ps << PPExtString(stringifyEnum(port.getDirection().getValue())) << " ";
     auto *signalDecl = state.symbolCache.getDefinition(port.getSignal());
-    ps << PPExtString(getSymOpName(signalDecl));
+    ps << PPExtString(getVerilogName(signalDecl));
   });
 
   ps << ");";
@@ -4381,7 +4367,7 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
       ps.spaces(maxTypeWidth - typeString.size());
 
     // Emit the name.
-    ps << PPExtString(getSymOpName(op));
+    ps << PPExtString(getVerilogName(op));
 
     // Print out any array subscripts or other post-name stuff.
     ps.invokeWithStringOS(
@@ -4535,7 +4521,7 @@ void ModuleEmitter::emitBind(BindOp op) {
   startStatement();
   ps << "bind " << PPExtString(parentVerilogName.getValue()) << PP::nbsp
      << PPExtString(childVerilogName.getValue()) << PP::nbsp
-     << PPExtString(getSymOpName(inst)) << " (";
+     << PPExtString(getVerilogName(inst)) << " (";
   bool isFirst = true; // True until we print a port.
   ps.scopedBox(PP::bbox2, [&]() {
     ModulePortInfo parentPortInfo = parentMod.getPorts();
@@ -4627,7 +4613,7 @@ StringRef ModuleEmitter::getNameRemotely(Value value) {
       Value drivenOnto = user->getOperand(0);
       Operation *drivenOntoOp = drivenOnto.getDefiningOp();
       if (isa<WireOp, RegOp, LogicOp>(drivenOntoOp))
-        return getSymOpName(drivenOntoOp);
+        return getVerilogName(drivenOntoOp);
     }
   }
 
@@ -4645,13 +4631,12 @@ void ModuleEmitter::emitBindInterface(BindInterfaceOp op) {
   startStatement();
   ps << "bind " << PPExtString(instantiator) << PP::nbsp
      << PPExtString(cast<InterfaceOp>(*interface).getSymName()) << PP::nbsp
-     << PPExtString(getSymOpName(instance)) << " (.*);" << PP::newline;
+     << PPExtString(getVerilogName(instance)) << " (.*);" << PP::newline;
   setPendingNewline();
 }
 
 void ModuleEmitter::emitHWModule(HWModuleOp module) {
   currentModuleOp = module;
-
 
   // Add all the ports to the name table so wires etc don't reuse the name.
   SmallVector<PortInfo> portInfo = module.getAllPorts();
@@ -5255,8 +5240,10 @@ LogicalResult circt::exportVerilog(ModuleOp module, llvm::raw_ostream &os) {
   LoweringOptions options(module);
   SmallVector<HWModuleOp> modulesToPrepare;
   module.walk([&](HWModuleOp op) { modulesToPrepare.push_back(op); });
-  parallelForEach(module->getContext(), modulesToPrepare,
-                  [&](auto op) { prepareHWModule(op, options); });
+  if (failed(failableParallelForEach(
+          module->getContext(), modulesToPrepare,
+          [&](auto op) { return prepareHWModule(op, options); })))
+    return failure();
   return exportVerilogImpl(module, os);
 }
 
@@ -5408,8 +5395,11 @@ LogicalResult circt::exportSplitVerilog(ModuleOp module, StringRef dirname) {
   LoweringOptions options(module);
   SmallVector<HWModuleOp> modulesToPrepare;
   module.walk([&](HWModuleOp op) { modulesToPrepare.push_back(op); });
-  parallelForEach(module->getContext(), modulesToPrepare,
-                  [&](auto op) { prepareHWModule(op, options); });
+  if (failed(failableParallelForEach(
+          module->getContext(), modulesToPrepare,
+          [&](auto op) { return prepareHWModule(op, options); })))
+    return failure();
+
   return exportSplitVerilogImpl(module, dirname);
 }
 
