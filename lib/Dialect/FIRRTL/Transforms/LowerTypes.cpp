@@ -1065,36 +1065,6 @@ bool TypeLoweringVisitor::visitDecl(WireOp op) {
   return lowerProducer(op, clone);
 }
 
-/*
-static SmallVector<StringAttr> getLoweredModuleInterfaces(FModuleLike module) {
-  SmallVector<StringAttr> modules;
-
-  // Flatten any bundle types.
-  SmallVector<FlatBundleFieldEntry> fieldTypes;
-  // Lower the module block arguments.
-  SmallVector<unsigned> argsToRemove;
-  SmallVector<PortInfo> ports = module.getPorts();
-  for (size_t argIndex = 0, argsRemoved = 0; argIndex < ports.size();
-       ++argIndex) {
-    auto oldPort = ports[argIndex];
-    SmallVector<FlatBundleFieldEntry> fields;
-    if (peelType(oldPort.type, fields, PreserveAggregate::None)) {
-      for (auto field : fields) {
-        auto newAnno = filterAnnotations(module.getContext(),
-                                         oldPort.annotations.getArrayAttr(),
-                                         nullptr, field);
-        // Save the name attribute for the new argument.
-        auto name =
-            builder->getStringAttr(oldArg.name.getValue() + field.suffix);
-      }
-      argsToRemove.push_back(argIndex);
-      ++argsRemoved;
-    }
-    // lowerArg might have invalidated any reference to newArgs, be careful
-  }
-}
-*/
-
 /// Lower a reg op with a bundle to multiple non-bundled regs.
 bool TypeLoweringVisitor::visitDecl(RegOp op) {
   auto clone = [&](const FlatBundleFieldEntry &field,
