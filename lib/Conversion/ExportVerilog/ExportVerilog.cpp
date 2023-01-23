@@ -751,104 +751,32 @@ static void emitSVAttributesImpl(PPS &os, sv::SVAttributesAttr svAttrs) {
 //===----------------------------------------------------------------------===//
 // ModuleNameManager Implementation
 //===----------------------------------------------------------------------===//
+/// Retrieve a name from the name table.  The name must already have been
+/// added.
+StringRef getVerilogName(Value val) {
+  if (isa_and_nonnull<sv::WireOp, sv::RegOp, sv::LogicOp, sv::LocalParamOp,
+                      sv::InterfaceInstanceOp>(val.getDefiningOp()))
+    if (auto name =
+            val.getDefiningOp()->getAttrOfType<StringAttr>("hw.verilogName"))
+      return name;
 
-namespace {
-/// This class keeps track of names for values within a module.
-struct ModuleNameManager {
-  ModuleNameManager() = default;
+  if (auto port = val.dyn_cast<BlockArgument>())
+    return getPortVerilogName(port.getParentBlock()->getParentOp(),
+                              port.getArgNumber());
+  assert(false && "unhandled value");
+}
 
-  StringRef addName(Value value, StringRef name) {
-    return addName(ValueOrOp(value), name);
-  }
-  StringRef addName(Operation *op, StringRef name) {
-    return addName(ValueOrOp(op), name);
-  }
-  StringRef addName(Value value, StringAttr name) {
-    return addName(ValueOrOp(value), name);
-  }
-  StringRef addName(Operation *op, StringAttr name) {
-    return addName(ValueOrOp(op), name);
-  }
+StringRef getVerilogName(Operation *op) {
+  if (auto name = op->getAttrOfType<StringAttr>("hw.verilogName"))
+    return name;
 
-  StringRef getName(Value value) { return getName(ValueOrOp(value)); }
-  StringRef getName(Operation *op) {
-    // If RegOp or WireOp, then result has the name.
-    if (isa<sv::WireOp, sv::RegOp, sv::LogicOp, hw::InstanceOp,
-            sv::LocalParamOp, sv::InterfaceInstanceOp>(op)) {
-      assert(op->hasAttr("hw.verilogName") &&
-             "declarations should have hw.verilogName attributes");
-      return op->getAttrOfType<StringAttr>("hw.verilogName");
-    }
-    return getName(ValueOrOp(op));
-  }
-
-private:
-  using ValueOrOp = PointerUnion<Value, Operation *>;
-
-  /// Retrieve a name from the name table.  The name must already have been
-  /// added.
-  StringRef getName(ValueOrOp valueOrOp) {
-    // If RegOp or WireOp, then result has the name.
-    if (auto val = valueOrOp.dyn_cast<Value>()) {
-      if (isa_and_nonnull<sv::WireOp, sv::RegOp, sv::LogicOp, sv::LocalParamOp,
-                          sv::InterfaceInstanceOp>(val.getDefiningOp())) {
-        assert(val.getDefiningOp()->hasAttr("hw.verilogName"));
-        return val.getDefiningOp()->getAttrOfType<StringAttr>("hw.verilogName");
-      } else if (auto port = val.dyn_cast<BlockArgument>()) {
-        return getPortVerilogName(port.getParentBlock()->getParentOp(),
-                                  port.getArgNumber());
-      }
-    }
-    if (auto val = valueOrOp.dyn_cast<Operation *>()) {
-      if (auto name = val->getAttrOfType<StringAttr>("hw.verilogName"))
-        return name;
-    }
-
-    llvm::errs() << "Name: ";
-    if (auto v = valueOrOp.dyn_cast<Value>())
-      v.print(llvm::errs());
-    else
-      valueOrOp.get<Operation *>()->print(llvm::errs());
-    llvm::errs()
-        << " Not found in name table! Most likely indicates that the given "
-           "op did not have an emitter in ExportVerilog, and should have "
-           "been lowered away before reaching this point.";
-    assert(false && "name not found (see above error)");
-  }
-
-  /// Add the specified name to the name table, auto-uniquing the name if
-  /// required.  If the name is empty, then this creates a unique temp name.
-  ///
-  /// "valueOrOp" is typically the Value for an intermediate wire etc, but it
-  /// can also be an op for an instance, since we want the instances op uniqued
-  /// and tracked.  It can also be null for things like outputs which are not
-  /// tracked in the nameTable.
-  StringRef addName(ValueOrOp valueOrOp, StringRef name);
-
-  StringRef addName(ValueOrOp valueOrOp, StringAttr nameAttr) {
-    return addName(valueOrOp, nameAttr ? nameAttr.getValue() : "");
-  }
-
-  /// nameTable keeps track of mappings from Value's and operations (for
-  /// instances) to their string table entry.
-  llvm::DenseMap<ValueOrOp, StringRef> nameTable;
-
-  NameCollisionResolver nameResolver;
-};
-} // end anonymous namespace
-
-/// Add the specified name to the name table, auto-uniquing the name if
-/// required.  If the name is empty, then this creates a unique temp name.
-///
-/// "valueOrOp" is typically the Value for an intermediate wire etc, but it
-/// can also be an op for an instance, since we want the instances op uniqued
-/// and tracked.  It can also be null for things like outputs which are not
-/// tracked in the nameTable.
-StringRef ModuleNameManager::addName(ValueOrOp valueOrOp, StringRef name) {
-  auto updatedName = nameResolver.getLegalName(name);
-  if (valueOrOp)
-    nameTable[valueOrOp] = updatedName;
-  return updatedName;
+  llvm::errs() << "Name: ";
+  op->print(llvm::errs());
+  llvm::errs()
+      << " Not found in name table! Most likely indicates that the given "
+         "op did not have an emitter in ExportVerilog, and should have "
+         "been lowered away before reaching this point.";
+  assert(false && "name not found (see above error)");
 }
 
 //===----------------------------------------------------------------------===//
@@ -960,7 +888,7 @@ public:
   template <typename PPS>
   void emitTextWithSubstitutions(PPS &ps, StringRef string, Operation *op,
                                  llvm::function_ref<void(Value)> operandEmitter,
-                                 ArrayAttr symAttrs, ModuleNameManager &names);
+                                 ArrayAttr symAttrs);
 
   /// Emit the value of a StringAttr as one or more Verilog "one-line" comments
   /// ("//").  Break the comment to respect the emittedLineLength and trim
@@ -992,8 +920,7 @@ private:
 template <typename PPS>
 void EmitterBase::emitTextWithSubstitutions(
     PPS &ps, StringRef string, Operation *op,
-    llvm::function_ref<void(Value)> operandEmitter, ArrayAttr symAttrs,
-    ModuleNameManager &names) {
+    llvm::function_ref<void(Value)> operandEmitter, ArrayAttr symAttrs) {
 
   // Perform operand substitions as we emit the line string.  We turn {{42}}
   // into the value of operand 42.
@@ -1761,11 +1688,9 @@ public:
   /// Create an ExprEmitter for the specified module emitter, and keeping track
   /// of any emitted expressions in the specified set.
   ExprEmitter(ModuleEmitter &emitter,
-              SmallPtrSetImpl<Operation *> &emittedExprs,
-              ModuleNameManager &names)
+              SmallPtrSetImpl<Operation *> &emittedExprs)
       : EmitterBase(emitter.state), emitter(emitter),
-        emittedExprs(emittedExprs), buffer(tokens), ps(buffer, state.saver),
-        names(names) {
+        emittedExprs(emittedExprs), buffer(tokens), ps(buffer, state.saver) {
     assert(state.pp.getListener() == &state.saver);
   }
 
@@ -2039,8 +1964,6 @@ private:
   /// Stream to emit expressions into, will add to buffer.
   TokenStream<BufferingPP> ps;
 
-  // Track legalized names.
-  ModuleNameManager &names;
 };
 } // end anonymous namespace
 
@@ -2170,11 +2093,11 @@ SubExprInfo ExprEmitter::emitSubExpr(Value exp,
     // All wires are declared as unsigned, so if the client needed it signed,
     // emit a conversion.
     if (signRequirement == RequireSigned) {
-      ps << "$signed(" << PPExtString(names.getName(exp)) << ")";
+      ps << "$signed(" << PPExtString(getVerilogName(exp)) << ")";
       return {Symbol, IsSigned};
     }
 
-    ps << PPExtString(names.getName(exp));
+    ps << PPExtString(getVerilogName(exp));
     return {Symbol, IsUnsigned};
   }
 
@@ -2338,7 +2261,7 @@ SubExprInfo ExprEmitter::visitSV(GetModportOp op) {
     emitError(op, "SV attributes emission is unimplemented for the op");
 
   auto decl = op.getReferencedDecl(state.symbolCache);
-  ps << PPExtString(names.getName(op.getIface())) << "."
+  ps << PPExtString(getVerilogName(op.getIface())) << "."
      << PPExtString(getSymOpName(decl));
   return {Selection, IsUnsigned};
 }
@@ -2363,7 +2286,7 @@ SubExprInfo ExprEmitter::visitSV(ReadInterfaceSignalOp op) {
 
   auto decl = op.getReferencedDecl(state.symbolCache);
 
-  ps << PPExtString(names.getName(op.getIface())) << "."
+  ps << PPExtString(getVerilogName(op.getIface())) << "."
      << PPExtString(getSymOpName(decl));
   return {Selection, IsUnsigned};
 }
@@ -2431,8 +2354,7 @@ SubExprInfo ExprEmitter::visitVerbatimExprOp(Operation *op, ArrayAttr symbols) {
 
   emitTextWithSubstitutions(
       ps, op->getAttrOfType<StringAttr>("format_string").getValue(), op,
-      [&](Value operand) { emitSubExpr(operand, LowestPrecedence); }, symbols,
-      names);
+      [&](Value operand) { emitSubExpr(operand, LowestPrecedence); }, symbols);
 
   return {Unary, IsUnsigned};
 }
@@ -2854,8 +2776,7 @@ SubExprInfo ExprEmitter::visitUnhandledExpr(Operation *op) {
 namespace {
 class NameCollector {
 public:
-  NameCollector(ModuleEmitter &moduleEmitter, ModuleNameManager &names)
-      : moduleEmitter(moduleEmitter), names(names) {}
+  NameCollector(ModuleEmitter &moduleEmitter) : moduleEmitter(moduleEmitter) {}
 
   // Scan operations in the specified block, collecting information about
   // those that need to be emitted as declarations.
@@ -2867,7 +2788,6 @@ public:
 private:
   size_t maxDeclNameWidth = 0, maxTypeWidth = 0;
   ModuleEmitter &moduleEmitter;
-  ModuleNameManager &names;
 };
 } // namespace
 
@@ -2942,8 +2862,8 @@ class StmtEmitter : public EmitterBase,
 public:
   /// Create an ExprEmitter for the specified module emitter, and keeping track
   /// of any emitted expressions in the specified set.
-  StmtEmitter(ModuleEmitter &emitter, ModuleNameManager &names)
-      : EmitterBase(emitter.state), emitter(emitter), names(names) {}
+  StmtEmitter(ModuleEmitter &emitter)
+      : EmitterBase(emitter.state), emitter(emitter) {}
 
   void emitStatement(Operation *op);
   void emitStatementBlock(Block &body);
@@ -3055,9 +2975,6 @@ public:
   ModuleEmitter &emitter;
 
 private:
-  /// Track the legalized names.
-  ModuleNameManager &names;
-
   /// These keep track of the maximum length of name width and type width in the
   /// current statement scope.
   size_t maxDeclNameWidth = 0;
@@ -3073,7 +2990,7 @@ private:
 void StmtEmitter::emitExpression(Value exp,
                                  SmallPtrSetImpl<Operation *> &emittedExprs,
                                  VerilogPrecedence parenthesizeIfLooserThan) {
-  ExprEmitter(emitter, emittedExprs, names)
+  ExprEmitter(emitter, emittedExprs)
       .emitExpression(exp, parenthesizeIfLooserThan);
 }
 
@@ -3369,8 +3286,7 @@ LogicalResult StmtEmitter::visitSV(VerbatimOp op) {
     // Emit each chunk of the line.
     emitTextWithSubstitutions(
         ps, lhsRhs.first, op,
-        [&](Value operand) { emitExpression(operand, ops); }, op.getSymbols(),
-        names);
+        [&](Value operand) { emitExpression(operand, ops); }, op.getSymbols());
     string = lhsRhs.second;
   }
 
@@ -3503,7 +3419,7 @@ LogicalResult StmtEmitter::visitSV(ReadMemOp op) {
             .getInnerDefinition(op->getParentOfType<HWModuleOp>().getNameAttr(),
                                 op.getInnerSymAttr())
             .getOp();
-    ps << PPExtString(names.getName(reg));
+    ps << PPExtString(getSymOpName(reg));
   });
 
   ps << ");";
@@ -3592,7 +3508,7 @@ LogicalResult StmtEmitter::visitSV(GenerateCaseOp op) {
 /// operation. If a label has been stored for the operation through
 /// `addLegalName` in the pre-pass, that label is used. Otherwise, if the
 /// `enforceVerifLabels` option is set, a temporary name for the operation is
-/// picked and uniquified through `addName`.
+/// picked and uniquified in pre-pass.
 void StmtEmitter::emitAssertionLabel(Operation *op, StringRef opName) {
   if (auto label = op->getAttrOfType<StringAttr>("hw.verilogName")) {
     ps << PPExtString(label) << ":" << PP::space;
@@ -4541,7 +4457,7 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
 void StmtEmitter::collectNamesAndCalculateDeclarationWidths(Block &block) {
   // In the first pass, we fill in the symbol table, calculate the max width
   // of the declaration words and the max type width.
-  NameCollector collector(emitter, names);
+  NameCollector collector(emitter);
   collector.collectNames(block);
 
   // Record maxDeclNameWidth and maxTypeWidth in the current scope.
@@ -4576,8 +4492,7 @@ void StmtEmitter::emitStatementBlock(Block &body) {
 // NOLINTEND(misc-no-recursion)
 
 void ModuleEmitter::emitStatement(Operation *op) {
-  ModuleNameManager names;
-  StmtEmitter(*this, names).emitStatement(op);
+  StmtEmitter(*this).emitStatement(op);
 }
 
 //===----------------------------------------------------------------------===//
@@ -4638,11 +4553,6 @@ void ModuleEmitter::emitBind(BindOp op) {
     // Emit the argument and result ports.
     auto opArgs = inst.getInputs();
     auto opResults = inst.getResults();
-    ModuleNameManager names;
-    for (auto arg : parentPortInfo.inputs) {
-      names.addName(parentMod.getArgument(arg.argNum),
-                    getPortVerilogName(parentMod, arg.argNum));
-    }
     for (auto &elt : childPortInfo) {
       // Figure out which value we are emitting.
       Value portVal =
@@ -4689,8 +4599,7 @@ void ModuleEmitter::emitBind(BindOp op) {
         ps << PPExtString(name);
       } else {
         llvm::SmallPtrSet<Operation *, 4> ops;
-        ExprEmitter(*this, ops, names)
-            .emitExpression(portVal, LowestPrecedence);
+        ExprEmitter(*this, ops).emitExpression(portVal, LowestPrecedence);
       }
       ps << ")";
 
@@ -4818,24 +4727,13 @@ void ModuleEmitter::emitBindInterface(BindInterfaceOp op) {
 void ModuleEmitter::emitHWModule(HWModuleOp module) {
   currentModuleOp = module;
 
-  ModuleNameManager names;
 
   // Add all the ports to the name table so wires etc don't reuse the name.
   SmallVector<PortInfo> portInfo = module.getAllPorts();
   for (auto &port : portInfo) {
-    StringRef name = getPortVerilogName(module, port);
     Value value;
     if (!port.isOutput())
       value = module.getArgument(port.argNum);
-    names.addName(value, name);
-  }
-
-  // Add all parameters to the name table.
-  for (auto param : module.getParameters()) {
-    // Add the name to the name table so any conflicting wires are renamed.
-    StringRef verilogName = state.globalNames.getParameterVerilogName(
-        module, param.cast<ParamDeclAttr>().getName());
-    names.addName(nullptr, verilogName);
   }
 
   SmallPtrSet<Operation *, 8> moduleOpSet;
@@ -5065,7 +4963,7 @@ void ModuleEmitter::emitHWModule(HWModuleOp module) {
   assert(state.pendingNewline);
 
   // Emit the body of the module.
-  StmtEmitter(*this, names).emitStatementBlock(*module.getBodyBlock());
+  StmtEmitter(*this).emitStatementBlock(*module.getBodyBlock());
   startStatement();
   ps << "endmodule" << PP::newline;
   setPendingNewline();
