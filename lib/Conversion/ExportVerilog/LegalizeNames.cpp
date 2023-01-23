@@ -185,9 +185,6 @@ static void legalizeModuleBody(const LoweringOptions &options,
                                   [](auto op) { return "assume"; });
           declAndNames.emplace_back(op, StringAttr::get(op->getContext(), str));
         }
-      } else {
-        assert(!op->hasAttrOfType<StringAttr>(verilogNameAttr) &&
-               "unhandle operation has hw.verilogName attribute");
       }
     }
   });
@@ -195,7 +192,9 @@ static void legalizeModuleBody(const LoweringOptions &options,
   for (auto [op, nameAttr] : declAndNames) {
     auto newName = nameResolver.getLegalName(nameAttr);
     assert(!newName.empty() && "must have valid name");
-    op->setAttr(verilogNameAttr, StringAttr::get(ctxt, newName));
+    op->setAttr(verilogNameAttr, nameAttr.getValue() == newName
+                                     ? nameAttr
+                                     : StringAttr::get(ctxt, newName));
   }
 }
 
