@@ -696,8 +696,8 @@ bool ExportVerilog::isExpressionEmittedInline(Operation *op,
   // Never create a temporary which is only going to be assigned to an output
   // port, wire, or reg.
   if (op->hasOneUse() &&
-      isa<hw::OutputOp, sv::AssignOp, sv::BPAssignOp, sv::PAssignOp>(
-          *op->getUsers().begin()))
+      isa<hw::OutputOp, sv::AssignOp, sv::BPAssignOp, sv::PAssignOp,
+          hw::InstanceOp>(*op->getUsers().begin()))
     return true;
 
   // If mux inlining is dissallowed, we cannot inline muxes.
@@ -4575,11 +4575,15 @@ void ModuleEmitter::emitBind(BindOp op) {
       ps << "." << PPExtString(elt.getName());
       ps.nbsp(maxNameLength - elt.getName().size());
       ps << " (";
-
-      // Emit the value as an expression.
-      auto name = getNameRemotely(portVal, parentPortInfo, parentMod);
-      assert(!name.empty() && "bind port connection must have a name");
-      ps << PPExtString(name) << ")";
+      if (elt.isOutput()) {
+        // Emit the value as an expression.
+        auto name = getNameRemotely(portVal);
+        ps << PPExtString(name);
+      } else {
+        llvm::SmallPtrSet<Operation *, 4> ops;
+        ExprEmitter(*this, ops).emitExpression(portVal, LowestPrecedence);
+      }
+      ps << ")";
 
       if (isZeroWidth)
         ps << PP::end; // Close never-break group.
@@ -4596,80 +4600,9 @@ void ModuleEmitter::emitBind(BindOp op) {
 /// up the corresponding name in the provide `GlobalNameTable`. This requires
 /// that all names this function may be asked to lookup have been legalized and
 /// added to that name table.
-StringRef ModuleEmitter::getNameRemotely(Value value,
-                                         const ModulePortInfo &modulePorts,
-                                         HWModuleOp remoteModule) {
-  if (auto barg = value.dyn_cast<BlockArgument>())
-    return getPortVerilogName(remoteModule,
-                              modulePorts.inputs[barg.getArgNumber()]);
-
-  Operation *valueOp = value.getDefiningOp();
-
-  // Handle wires/registers/XMR references, likely as instance inputs.
-  if (auto readinout = dyn_cast<ReadInOutOp>(valueOp)) {
-    auto *wireInput = readinout.getInput().getDefiningOp();
-    if (!wireInput)
-      return {};
-    if (isa<WireOp, RegOp, LogicOp>(wireInput))
-      return getSymOpName(wireInput);
-
-    if (auto xmr = dyn_cast<XMROp>(wireInput)) {
-      SmallString<16> xmrString;
-      if (xmr.getIsRooted())
-        xmrString.append("$root.");
-      for (auto s : xmr.getPath()) {
-        xmrString.append(s.cast<StringAttr>().getValue());
-        xmrString.append(".");
-      }
-      xmrString.append(xmr.getTerminal());
-      return StringAttr::get(value.getContext(), xmrString);
-    }
-
-    // TODO: This shares a lot of code with the XMRRefOp visitor. Combine these
-    // to share logic.
-    if (auto xmrRef = dyn_cast<XMRRefOp>(wireInput)) {
-      SmallString<32> xmrString;
-      auto refAttr = xmrRef.getRefAttr();
-
-      if (auto innerRef = dyn_cast<InnerRefAttr>(refAttr)) {
-        auto ref = state.symbolCache.getInnerDefinition(innerRef.getModule(),
-                                                        innerRef.getName());
-        auto *module = state.symbolCache.getDefinition(innerRef.getModule());
-        xmrString.append(getSymOpName(module));
-        xmrString.append(".");
-        if (ref.hasPort())
-          xmrString.append(getPortVerilogName(ref.getOp(), ref.getPort()));
-        else
-          xmrString.append(getSymOpName(ref.getOp()));
-      } else {
-
-        auto globalRef = cast<hw::HierPathOp>(state.symbolCache.getDefinition(
-            cast<FlatSymbolRefAttr>(xmrRef.getRefAttr()).getAttr()));
-        auto namepath = globalRef.getNamepathAttr().getValue();
-        auto *module = state.symbolCache.getDefinition(
-            cast<InnerRefAttr>(namepath.front()).getModule());
-        xmrString.append(getSymOpName(module));
-        for (auto sym : namepath) {
-          xmrString.append(".");
-          auto innerRef = cast<InnerRefAttr>(sym);
-          auto ref = state.symbolCache.getInnerDefinition(innerRef.getModule(),
-                                                          innerRef.getName());
-          if (ref.hasPort()) {
-            xmrString.append(getPortVerilogName(ref.getOp(), ref.getPort()));
-            continue;
-          }
-          xmrString.append(getSymOpName(ref.getOp()));
-        }
-      }
-      auto leaf = xmrRef.getStringLeafAttr();
-      if (leaf && leaf.size())
-        xmrString.append(leaf);
-      return StringAttr::get(xmrRef.getContext(), xmrString);
-    }
-  }
-
+StringRef ModuleEmitter::getNameRemotely(Value value) {
   // Handle values being driven onto wires, likely as instance outputs.
-  if (isa<InstanceOp>(valueOp)) {
+  if (isa<InstanceOp>(value.getDefiningOp())) {
     for (auto &use : value.getUses()) {
       Operation *user = use.getOwner();
       if (!isa<AssignOp>(user) || use.getOperandNumber() != 1)
@@ -4681,9 +4614,6 @@ StringRef ModuleEmitter::getNameRemotely(Value value,
     }
   }
 
-  // Handle local parameters.
-  if (isa<LocalParamOp>(valueOp))
-    return getSymOpName(valueOp);
   return {};
 }
 
