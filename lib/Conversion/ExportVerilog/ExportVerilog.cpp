@@ -775,20 +775,11 @@ struct ModuleNameManager {
     // If RegOp or WireOp, then result has the name.
     if (isa<sv::WireOp, sv::RegOp, sv::LogicOp, hw::InstanceOp,
             sv::LocalParamOp, sv::InterfaceInstanceOp>(op)) {
-      assert(op->hasAttr("hw.verilogName"));
+      assert(op->hasAttr("hw.verilogName") &&
+             "declarations should have hw.verilogName attributes");
       return op->getAttrOfType<StringAttr>("hw.verilogName");
     }
     return getName(ValueOrOp(op));
-  }
-
-  bool hasName(Value value) { return nameTable.count(ValueOrOp(value)); }
-
-  bool hasName(Operation *op) {
-    // If RegOp or WireOp, then result has the name.
-    if (isa<sv::WireOp, sv::RegOp, sv::LogicOp, hw::InstanceOp,
-            sv::LocalParamOp, sv::InterfaceInstanceOp>(op))
-      return op->hasAttr("hw.verilogName");
-    return nameTable.count(ValueOrOp(op));
   }
 
 private:
@@ -803,28 +794,26 @@ private:
                           sv::InterfaceInstanceOp>(val.getDefiningOp())) {
         assert(val.getDefiningOp()->hasAttr("hw.verilogName"));
         return val.getDefiningOp()->getAttrOfType<StringAttr>("hw.verilogName");
+      } else if (auto port = val.dyn_cast<BlockArgument>()) {
+        return getPortVerilogName(port.getParentBlock()->getParentOp(),
+                                  port.getArgNumber());
       }
     }
     if (auto val = valueOrOp.dyn_cast<Operation *>()) {
-      if (isa<hw::InstanceOp, sv::InterfaceInstanceOp>(val)) {
-        assert(val->hasAttr("hw.verilogName"));
-        return val->getAttrOfType<StringAttr>("hw.verilogName");
-      }
+      if (auto name = val->getAttrOfType<StringAttr>("hw.verilogName"))
+        return name;
     }
-    auto entry = nameTable.find(valueOrOp);
-    if (entry == nameTable.end()) {
-      llvm::errs() << "Name: ";
-      if (auto v = valueOrOp.dyn_cast<Value>())
-        v.print(llvm::errs());
-      else
-        valueOrOp.get<Operation *>()->print(llvm::errs());
-      llvm::errs()
-          << " Not found in name table! Most likely indicates that the given "
-             "op did not have an emitter in ExportVerilog, and should have "
-             "been lowered away before reaching this point.";
-      assert(false && "name not found (see above error)");
-    }
-    return entry->getSecond();
+
+    llvm::errs() << "Name: ";
+    if (auto v = valueOrOp.dyn_cast<Value>())
+      v.print(llvm::errs());
+    else
+      valueOrOp.get<Operation *>()->print(llvm::errs());
+    llvm::errs()
+        << " Not found in name table! Most likely indicates that the given "
+           "op did not have an emitter in ExportVerilog, and should have "
+           "been lowered away before reaching this point.";
+    assert(false && "name not found (see above error)");
   }
 
   /// Add the specified name to the name table, auto-uniquing the name if
@@ -2919,14 +2908,6 @@ void NameCollector::collectNames(Block &block) {
       }
     }
 
-    // Notice and renamify the labels on verification statements.
-    if (isa<AssertOp, AssumeOp, CoverOp, AssertConcurrentOp, AssumeConcurrentOp,
-            CoverConcurrentOp>(op)) {
-      if (auto labelAttr = op.getAttrOfType<StringAttr>("label"))
-        names.addName(&op, labelAttr);
-      continue;
-    }
-
     // Recursively process any regions under the op iff this is a procedural
     // #ifdef region: we need to emit automatic logic values at the top of the
     // enclosing region.
@@ -3537,11 +3518,11 @@ LogicalResult StmtEmitter::visitSV(GenerateOp op) {
   // TODO: location info?
   startStatement();
   ps << "generate" << PP::newline;
-  ps << "begin: " << PPExtString(names.addName(op, op.getSymName()));
+  ps << "begin: " << PPExtString(getSymOpName(op));
   setPendingNewline();
   emitStatementBlock(op.getBody().getBlocks().front());
   startStatement();
-  ps << "end: " << PPExtString(names.getName(op)) << PP::newline;
+  ps << "end: " << PPExtString(getSymOpName(op)) << PP::newline;
   ps << "endgenerate";
   setPendingNewline();
   return success();
@@ -3613,10 +3594,8 @@ LogicalResult StmtEmitter::visitSV(GenerateCaseOp op) {
 /// `enforceVerifLabels` option is set, a temporary name for the operation is
 /// picked and uniquified through `addName`.
 void StmtEmitter::emitAssertionLabel(Operation *op, StringRef opName) {
-  if (op->getAttrOfType<StringAttr>("label")) {
-    ps << PPExtString(names.getName(op)) << ":" << PP::space;
-  } else if (state.options.enforceVerifLabels) {
-    ps << PPExtString(names.addName(op, opName)) << ":" << PP::space;
+  if (auto label = op->getAttrOfType<StringAttr>("hw.verilogName")) {
+    ps << PPExtString(label) << ":" << PP::space;
   }
 }
 
@@ -4112,7 +4091,7 @@ LogicalResult StmtEmitter::visitStmt(InstanceOp op) {
     }
   }
 
-  ps << PP::nbsp << PPExtString(names.getName(op)) << " (";
+  ps << PP::nbsp << PPExtString(getSymOpName(op)) << " (";
 
   SmallVector<PortInfo> portInfo = getAllModulePortInfos(op);
 
@@ -4487,7 +4466,7 @@ LogicalResult StmtEmitter::emitDeclaration(Operation *op) {
       ps.spaces(maxTypeWidth - typeString.size());
 
     // Emit the name.
-    ps << PPExtString(names.getName(value));
+    ps << PPExtString(getSymOpName(op));
 
     // Print out any array subscripts or other post-name stuff.
     ps.invokeWithStringOS(
@@ -5411,9 +5390,9 @@ void SharedEmitterState::emitOps(EmissionList &thingsToEmit, raw_ostream &os,
 //===----------------------------------------------------------------------===//
 
 static LogicalResult exportVerilogImpl(ModuleOp module, llvm::raw_ostream &os) {
-  GlobalNameTable globalNames = legalizeGlobalNames(module);
-
   LoweringOptions options(module);
+  GlobalNameTable globalNames = legalizeGlobalNames(module, options);
+
   SharedEmitterState emitter(module, options, std::move(globalNames));
   emitter.gatherFiles(false);
 
@@ -5543,7 +5522,7 @@ static LogicalResult exportSplitVerilogImpl(ModuleOp module,
   // Prepare the ops in the module for emission and legalize the names that will
   // end up in the output.
   LoweringOptions options(module);
-  GlobalNameTable globalNames = legalizeGlobalNames(module);
+  GlobalNameTable globalNames = legalizeGlobalNames(module, options);
 
   SharedEmitterState emitter(module, options, std::move(globalNames));
   emitter.gatherFiles(true);
