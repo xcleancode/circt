@@ -49,7 +49,7 @@ def ConnectOp : FIRRTLOp<"connect", [FConnectLike]> {
   let hasCanonicalizer = true;
 }
 
-def StrictConnectOp : FIRRTLOp<"strictconnect", [SameTypeOperands, FConnectLike]> {
+def StrictConnectOp : FIRRTLOp<"strictconnect", [FConnectLike]> {
   let summary = "Connect two signals";
   let description =  [{
     Connect two values with strict constraints:
@@ -66,7 +66,7 @@ def StrictConnectOp : FIRRTLOp<"strictconnect", [SameTypeOperands, FConnectLike]
   let hasVerifier = 1;
 
   let assemblyFormat =
-    "$dest `,` $src  attr-dict `:` qualified(type($dest))";
+    "$dest `,` $src  attr-dict `:` custom<ConstDecayStrictConnect>(qualified(type($dest)), qualified(type($src)))";
 }
 
 def PrintFOp : FIRRTLOp<"printf"> {
