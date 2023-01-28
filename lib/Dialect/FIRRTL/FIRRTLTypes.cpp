@@ -368,6 +368,24 @@ unsigned RecursiveTypeProperties::toFlags() const {
 // FIRRTLBaseType Implementation
 //===----------------------------------------------------------------------===//
 
+struct circt::firrtl::detail::FIRRTLBaseTypeStorage : mlir::TypeStorage {
+  // Use `char` instead of `bool` since llvm already provides a
+  // DenseMapInfo<char> specialization
+  using KeyTy = char;
+
+  FIRRTLBaseTypeStorage(bool isConst) : isConst(static_cast<char>(isConst)) {}
+
+  bool operator==(const KeyTy &key) const { return key == isConst; }
+
+  static FIRRTLBaseTypeStorage *construct(TypeStorageAllocator &allocator,
+                                          KeyTy key) {
+    return new (allocator.allocate<FIRRTLBaseTypeStorage>())
+        FIRRTLBaseTypeStorage(key);
+  }
+
+  char isConst;
+};
+
 /// Return true if this is a 'ground' type, aka a non-aggregate type.
 bool FIRRTLBaseType::isGround() {
   return TypeSwitch<FIRRTLBaseType, bool>(*this)
@@ -380,16 +398,7 @@ bool FIRRTLBaseType::isGround() {
       });
 }
 
-bool FIRRTLBaseType::isConst() {
-  return TypeSwitch<FIRRTLBaseType, bool>(*this)
-      .Case<ClockType, ResetType, AsyncResetType, AnalogType, SIntType,
-            UIntType, BundleType, FVectorType>(
-          [](auto type) { return type.isConst(); })
-      .Default([](Type) {
-        llvm_unreachable("unknown FIRRTL type");
-        return false;
-      });
-}
+bool FIRRTLBaseType::isConst() { return getImpl()->isConst; }
 
 /// Return a pair with the 'isPassive' and 'containsAnalog' bits.
 RecursiveTypeProperties FIRRTLBaseType::getRecursiveTypeProperties() {
@@ -761,10 +770,27 @@ int32_t IntType::getWidthOrSentinel() {
   return -1;
 }
 
-bool IntType::isConst() {
-  return isSigned() ? this->cast<SIntType>().isConst()
-                    : this->cast<UIntType>().isConst();
-}
+//===----------------------------------------------------------------------===//
+// WidthTypeStorage
+//===----------------------------------------------------------------------===//
+
+struct circt::firrtl::detail::WidthTypeStorage : detail::FIRRTLBaseTypeStorage {
+  WidthTypeStorage(int32_t width, bool isConst)
+      : FIRRTLBaseTypeStorage(isConst), width(width) {}
+  using KeyTy = std::pair<int32_t, char>;
+
+  bool operator==(const KeyTy &key) const {
+    return key == std::pair{width, isConst};
+  }
+
+  static WidthTypeStorage *construct(TypeStorageAllocator &allocator,
+                                     const KeyTy &key) {
+    return new (allocator.allocate<WidthTypeStorage>())
+        WidthTypeStorage(key.first, key.second);
+  }
+
+  int32_t width;
+};
 
 //===----------------------------------------------------------------------===//
 // SIntType
@@ -784,6 +810,8 @@ LogicalResult SIntType::verify(function_ref<InFlightDiagnostic()> emitError,
   return success();
 }
 
+int32_t SIntType::getWidthOrSentinel() const { return getImpl()->width; }
+
 //===----------------------------------------------------------------------===//
 // UIntType
 //===----------------------------------------------------------------------===//
@@ -802,19 +830,27 @@ LogicalResult UIntType::verify(function_ref<InFlightDiagnostic()> emitError,
   return success();
 }
 
+int32_t UIntType::getWidthOrSentinel() const { return getImpl()->width; }
+
 //===----------------------------------------------------------------------===//
 // Bundle Type
 //===----------------------------------------------------------------------===//
 
-struct circt::firrtl::detail::BundleTypeStorage : mlir::TypeStorage {
+struct circt::firrtl::detail::BundleTypeStorage
+    : detail::FIRRTLBaseTypeStorage {
   using KeyTy = ArrayRef<BundleType::BundleElement>;
 
   BundleTypeStorage(KeyTy elements)
-      : elements(elements.begin(), elements.end()) {
+      : detail::FIRRTLBaseTypeStorage(
+            elements.empty() ? false
+                             : llvm::all_of(elements,
+                                            [](auto element) {
+                                              return element.type.isConst();
+                                            })),
+        elements(elements.begin(), elements.end()) {
     RecursiveTypeProperties props{true, false, false};
     uint64_t fieldID = 0;
     fieldIDs.reserve(elements.size());
-    isConst = !elements.empty();
     for (auto &element : elements) {
       auto type = element.type;
       auto eltInfo = type.getRecursiveTypeProperties();
@@ -825,10 +861,6 @@ struct circt::firrtl::detail::BundleTypeStorage : mlir::TypeStorage {
       fieldIDs.push_back(fieldID);
       // Increment the field ID for the next field by the number of subfields.
       fieldID += type.getMaxFieldID();
-
-      // Any non-const element types makes this type non-const
-      if (!type.isConst())
-        isConst = false;
     }
     maxFieldID = fieldID;
     passiveContainsAnalogTypeInfo.setInt(props.toFlags());
@@ -848,7 +880,6 @@ struct circt::firrtl::detail::BundleTypeStorage : mlir::TypeStorage {
   SmallVector<BundleType::BundleElement, 4> elements;
   SmallVector<uint64_t, 4> fieldIDs;
   uint64_t maxFieldID;
-  bool isConst;
 
   /// This holds the bits for the type's recursive properties, and can hold a
   /// pointer to a passive version of the type.
@@ -891,8 +922,6 @@ FIRRTLBaseType BundleType::getPassiveType() {
   impl->passiveContainsAnalogTypeInfo.setPointer(passiveType);
   return passiveType;
 }
-
-bool BundleType::isConst() { return getImpl()->isConst; }
 
 std::optional<unsigned> BundleType::getElementIndex(StringAttr name) {
   for (const auto &it : llvm::enumerate(getElements())) {
@@ -994,10 +1023,12 @@ std::pair<uint64_t, bool> BundleType::rootChildFieldID(uint64_t fieldID,
 // FVectorType
 //===----------------------------------------------------------------------===//
 
-struct circt::firrtl::detail::FVectorTypeStorage : mlir::TypeStorage {
+struct circt::firrtl::detail::FVectorTypeStorage
+    : detail::FIRRTLBaseTypeStorage {
   using KeyTy = std::pair<FIRRTLBaseType, size_t>;
 
-  FVectorTypeStorage(KeyTy value) : value(value) {
+  FVectorTypeStorage(KeyTy value)
+      : detail::FIRRTLBaseTypeStorage(value.first.isConst()), value(value) {
     auto properties = value.first.getRecursiveTypeProperties();
     passiveContainsAnalogTypeInfo.setInt(properties.toFlags());
   }
@@ -1055,8 +1086,6 @@ FIRRTLBaseType FVectorType::getPassiveType() {
   impl->passiveContainsAnalogTypeInfo.setPointer(passiveType);
   return passiveType;
 }
-
-bool FVectorType::isConst() { return getElementType().isConst(); }
 
 uint64_t FVectorType::getFieldID(uint64_t index) {
   return 1 + index * (getElementType().getMaxFieldID() + 1);
@@ -1146,6 +1175,8 @@ LogicalResult AnalogType::verify(function_ref<InFlightDiagnostic()> emitError,
     return emitError() << "invalid width";
   return success();
 }
+
+int32_t AnalogType::getWidthOrSentinel() const { return getImpl()->width; }
 
 //===----------------------------------------------------------------------===//
 // FIRRTLDialect
