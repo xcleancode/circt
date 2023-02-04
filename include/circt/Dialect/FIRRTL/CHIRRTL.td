@@ -109,14 +109,18 @@ def CombMemOp : CHIRRTLOp<"combmem", [HasCustomSSAName, FNamableOp]> {
     write latency of 1 and a read latency of 0.
   }];
   let arguments = (ins StrAttr:$name, NameKindAttr:$nameKind,
-                       AnnotationArrayAttr:$annotations, OptionalAttr<InnerSymAttr>:$inner_sym);
+                       AnnotationArrayAttr:$annotations,
+                       OptionalAttr<InnerSymAttr>:$inner_sym,
+                       OptionalAttr<MemoryInitAttr>:$init);
   let results = (outs CMemoryType:$result);
   let assemblyFormat = [{(`sym` $inner_sym^)? custom<NameKind>($nameKind)
                          custom<CombMemOp>(attr-dict) `:` qualified(type($result))}];
   let builders = [
     OpBuilder<(ins "firrtl::FIRRTLBaseType":$elementType, "uint64_t":$numElements,
                    "mlir::StringRef":$name, "firrtl::NameKindEnum":$nameKind,
-                   "ArrayAttr":$annotations, CArg<"StringAttr", "StringAttr()">:$inner_sym)>
+                   "ArrayAttr":$annotations,
+                   CArg<"StringAttr", "StringAttr()">:$inner_sym,
+                   CArg<"firrtl::MemoryInitAttr", "firrtl::MemoryInitAttr{}">:$init)>
   ];
 }
 
@@ -128,7 +132,8 @@ def SeqMemOp : CHIRRTLOp<"seqmem", [HasCustomSSAName, FNamableOp]> {
   }];
   let arguments = (ins RUWAttr:$ruw, StrAttr:$name, NameKindAttr:$nameKind,
                        AnnotationArrayAttr:$annotations,
-                       OptionalAttr<InnerSymAttr>:$inner_sym);
+                       OptionalAttr<InnerSymAttr>:$inner_sym,
+                       OptionalAttr<MemoryInitAttr>:$init);
   let results = (outs CMemoryType:$result);
   let assemblyFormat = [{(`sym` $inner_sym^)? custom<NameKind>($nameKind) $ruw
                          custom<SeqMemOp>(attr-dict) `:` qualified(type($result))}];
@@ -136,7 +141,8 @@ def SeqMemOp : CHIRRTLOp<"seqmem", [HasCustomSSAName, FNamableOp]> {
     OpBuilder<(ins "firrtl::FIRRTLBaseType":$elementType, "uint64_t":$numElements,
                    "RUWAttr":$ruw, "mlir::StringRef":$name,
                    "firrtl::NameKindEnum":$nameKind, "ArrayAttr":$annotations,
-                   CArg<"StringAttr", "StringAttr()">:$inner_sym)>
+                   CArg<"StringAttr", "StringAttr()">:$inner_sym,
+                   CArg<"firrtl::MemoryInitAttr", "firrtl::MemoryInitAttr{}">:$init)>
   ];
 }
 
