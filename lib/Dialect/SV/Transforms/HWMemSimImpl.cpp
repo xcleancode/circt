@@ -40,6 +40,9 @@ struct FirMemory {
   size_t readUnderWrite;
   WUW writeUnderWrite;
   SmallVector<int32_t> writeClockIDs;
+  StringRef initFilename;
+  bool initIsBinary;
+  bool initIsInline;
 };
 } // end anonymous namespace
 
@@ -108,6 +111,9 @@ static FirMemory analyzeMemOp(HWModuleGeneratedOp op) {
     for (auto clockID : clockIDsAttr)
       mem.writeClockIDs.push_back(
           clockID.cast<IntegerAttr>().getValue().getZExtValue());
+  mem.initFilename = op->getAttrOfType<StringAttr>("initFilename").getValue();
+  mem.initIsBinary = op->getAttrOfType<BoolAttr>("initIsBinary").getValue();
+  mem.initIsInline = op->getAttrOfType<BoolAttr>("initIsInline").getValue();
   return mem;
 }
 
@@ -441,6 +447,57 @@ void HWMemSimImpl::generateMemory(HWModuleOp op, FirMemory mem) {
   auto *outputOp = op.getBodyBlock()->getTerminator();
   outputOp->setOperands(outputs);
 
+  // Add logic to initialize the memory based on a file emission request.  This
+  // disables randomization.
+  if (!mem.initFilename.empty()) {
+    // Set an inner symbol on the register if one does not exist.
+    if (!reg.getInnerSymAttr())
+      reg.setInnerSymAttr(
+          b.getStringAttr(moduleNamespace.newName(reg.getName())));
+
+    if (mem.initIsInline) {
+      b.create<sv::IfDefOp>("SYNTHESIS", std::function<void()>(), [&]() {
+        b.create<sv::InitialOp>([&]() {
+          b.create<sv::ReadMemOp>(reg, mem.initFilename,
+                                  mem.initIsBinary
+                                      ? MemBaseTypeAttr::MemBaseBin
+                                      : MemBaseTypeAttr::MemBaseHex);
+        });
+      });
+    } else {
+      OpBuilder::InsertionGuard guard(b);
+
+      // Create a new module with the readmem op.
+      b.setInsertionPointAfter(op);
+      auto boundModule = b.create<HWModuleOp>(
+          b.getStringAttr(op.getName() + "_bind"), ArrayRef<PortInfo>());
+      b.setInsertionPointToStart(op.getBodyBlock());
+      b.setInsertionPointToStart(boundModule.getBodyBlock());
+      b.create<sv::InitialOp>([&]() {
+        auto xmr = b.create<sv::XMRRefOp>(
+            reg.getType(),
+            hw::InnerRefAttr::get(op.getNameAttr(), reg.getInnerSymAttr()));
+        b.create<sv::ReadMemOp>(xmr, mem.initFilename,
+                                mem.initIsBinary ? MemBaseTypeAttr::MemBaseBin
+                                                 : MemBaseTypeAttr::MemBaseHex);
+      });
+
+      // Instantiate this new module inside the memory module.
+      b.setInsertionPointAfter(reg);
+      auto boundInstance = b.create<hw::InstanceOp>(
+          boundModule, boundModule.getName(), ArrayRef<Value>());
+      boundInstance->setAttr("inner_sym",
+                             b.getStringAttr(moduleNamespace.newName(
+                                 boundInstance.getName().getValue())));
+      boundInstance->setAttr("doNotPrint", b.getBoolAttr(true));
+
+      // Bind the new module.
+      b.setInsertionPointAfter(boundModule);
+      b.create<sv::BindOp>(hw::InnerRefAttr::get(
+          op.getNameAttr(), boundInstance.getInnerSymAttr()));
+    }
+  }
+
   // Add logic to initialize the memory and any internal registers to random
   // values.
   if (disableMemRandomization && disableRegRandomization)
@@ -453,7 +510,7 @@ void HWMemSimImpl::generateMemory(HWModuleOp op, FirMemory mem) {
     StringRef initvar;
 
     // Declare variables for use by memory randomization logic.
-    if (!disableMemRandomization) {
+    if (!disableMemRandomization || !mem.initFilename.empty()) {
       b.create<sv::IfDefOp>("RANDOMIZE_MEM_INIT", [&]() {
         initvar = moduleNamespace.newName("initvar");
         b.create<sv::VerbatimOp>("integer " + Twine(initvar) + ";\n");
